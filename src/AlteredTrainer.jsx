@@ -376,7 +376,7 @@ function PositionsTab({ root, labelMode, settings }) {
       {kind !== 'off' && (
         <div style={{ background:'#13121f', border:'1px solid #2dd4bf44', borderRadius:12, padding:'12px 13px', marginTop:14 }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
-            <div style={{ fontSize:13, fontWeight:800 }}>Resolving to <span style={{ color:'#74b9ff' }}>{targetName}</span></div>
+            <div style={{ fontSize:13, fontWeight:800 }}>Resolving to <span style={{ color:'#2dd4bf' }}>{targetName}</span></div>
             <PlayBtn onClick={playGuides} label="▶ Guide tones" small />
           </div>
           <div style={{ fontSize:12, lineHeight:1.6, color:'#ccc', marginBottom:8 }}>
@@ -429,7 +429,7 @@ function SettingsTab({ settings, onChange }) {
         <div style={h}>Default key selector</div>
         <div style={{ display:'flex', gap:6 }}>
           <button onClick={()=>set({defKeyMode:'dom'})} style={seg(settings.defKeyMode!=='tonic')}>V7alt root</button>
-          <button onClick={()=>set({defKeyMode:'tonic'})} style={seg(settings.defKeyMode==='tonic')}>Resolves to</button>
+          <button onClick={()=>set({defKeyMode:'tonic'})} style={tseg(settings.defKeyMode==='tonic')}>Resolves to</button>
         </div>
         <div style={{ fontSize:11, color:'#777', marginTop:8, lineHeight:1.5 }}>Which value the note grid sets by default — the other is computed automatically.</div>
       </div>
@@ -492,7 +492,7 @@ function BannerStack() {
     return () => window.removeEventListener('beforeinstallprompt', onBip);
   }, [standalone, isIOS]);
   if (!show || standalone) return null;
-  const wrap = { position:'fixed', bottom:'max(14px,env(safe-area-inset-bottom))', left:12, right:12, background:'#1a1830', border:'1px solid #2a2840', borderRadius:12, padding:'11px 13px', display:'flex', alignItems:'center', gap:10, boxShadow:'0 8px 30px #0008', zIndex:50 };
+  const wrap = { position:'fixed', bottom:'max(14px,env(safe-area-inset-bottom))', left:'50%', transform:'translateX(-50%)', width:'calc(100% - 24px)', maxWidth:406, boxSizing:'border-box', background:'#1a1830', border:'1px solid #2a2840', borderRadius:12, padding:'11px 13px', display:'flex', alignItems:'center', gap:10, boxShadow:'0 8px 30px #0008', zIndex:50 };
   const close = () => { setShow(false); try { localStorage.setItem('at_ios_hint','1'); } catch(e){} };
   return (
     <div style={wrap} onClick={e=>e.stopPropagation()}>
@@ -566,7 +566,8 @@ export default function App() {
   const TABS = [{id:'explorer',label:'Explorer',icon:'🧭'},{id:'positions',label:'Positions',icon:'🎸'},{id:'settings',label:'Settings',icon:'⚙️'}];
 
   return (
-    <div style={{ background:'#0f0e17', height:'100dvh', display:'flex', flexDirection:'column', color:'#fffffe', fontFamily:"'Segoe UI',system-ui,sans-serif", WebkitFontSmoothing:'antialiased', paddingTop:'env(safe-area-inset-top)' }}>
+    <div style={{ background:'#08080d', height:'100dvh', display:'flex', justifyContent:'center' }}>
+    <div style={{ background:'#0f0e17', height:'100dvh', width:'100%', maxWidth:430, boxSizing:'border-box', borderLeft:'1px solid #1a1928', borderRight:'1px solid #1a1928', display:'flex', flexDirection:'column', color:'#fffffe', fontFamily:"'Segoe UI',system-ui,sans-serif", WebkitFontSmoothing:'antialiased', paddingTop:'env(safe-area-inset-top)' }}>
       {/* header */}
       <div style={{ padding:'10px 12px', borderBottom:'1px solid #1a1928', display:'flex', alignItems:'center', gap:8 }}>
         <div style={{ display:'flex', flexDirection:'column' }}>
@@ -586,21 +587,21 @@ export default function App() {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:7 }}>
           <div style={{ display:'flex', gap:5 }}>
             <button onClick={()=>setKeyMode('dom')} style={{ padding:'5px 10px', borderRadius:14, fontSize:11, fontWeight:700, cursor:'pointer', minHeight:30, border:`1px solid ${keyMode==='dom'?'#e17055':'#2a2840'}`, background:keyMode==='dom'?'#e17055':'transparent', color:keyMode==='dom'?'#fff':'#999', touchAction:'manipulation' }}>V7alt root</button>
-            <button onClick={()=>setKeyMode('tonic')} style={{ padding:'5px 10px', borderRadius:14, fontSize:11, fontWeight:700, cursor:'pointer', minHeight:30, border:`1px solid ${keyMode==='tonic'?'#74b9ff':'#2a2840'}`, background:keyMode==='tonic'?'#74b9ff':'transparent', color:keyMode==='tonic'?'#fff':'#999', touchAction:'manipulation' }}>Resolves to</button>
+            <button onClick={()=>setKeyMode('tonic')} style={{ padding:'5px 10px', borderRadius:14, fontSize:11, fontWeight:700, cursor:'pointer', minHeight:30, border:`1px solid ${keyMode==='tonic'?'#2dd4bf':'#2a2840'}`, background:keyMode==='tonic'?'#2dd4bf':'transparent', color:keyMode==='tonic'?'#06281f':'#999', touchAction:'manipulation' }}>Resolves to</button>
           </div>
           <div style={{ fontSize:12.5, fontWeight:800, whiteSpace:'nowrap' }}>
             <span style={{color:'#e17055'}}>{NOTE_NAMES[root]}7alt</span>
             <span style={{color:'#666'}}> → </span>
-            <span style={{color:'#74b9ff'}}>{NOTE_NAMES[(root+5)%12]}</span>
+            <span style={{color:'#2dd4bf'}}>{NOTE_NAMES[(root+5)%12]}</span>
           </div>
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(12,1fr)', gap:3 }}>
           {NOTE_NAMES.map((n,i)=>{
             const active = keyMode==='dom' ? root===i : ((root+5)%12)===i;
-            const accent = keyMode==='dom' ? '#e17055' : '#74b9ff';
+            const accent = keyMode==='dom' ? '#e17055' : '#2dd4bf';
             return (
               <button key={i} onClick={()=>setRoot(keyMode==='dom' ? i : (i+7)%12)}
-                style={{ padding:'7px 0', borderRadius:6, fontSize:11, fontWeight:800, cursor:'pointer', minHeight:34, border:`1px solid ${active?accent:'#2a2840'}`, background:active?accent:'transparent', color:active?'#fff':'#999', touchAction:'manipulation' }}>{n}</button>
+                style={{ padding:'7px 0', borderRadius:6, fontSize:11, fontWeight:800, cursor:'pointer', minHeight:34, border:`1px solid ${active?accent:'#2a2840'}`, background:active?accent:'transparent', color:active?(keyMode==='tonic'?'#06281f':'#fff'):'#999', touchAction:'manipulation' }}>{n}</button>
             );
           })}
         </div>
@@ -624,6 +625,7 @@ export default function App() {
       </div>
 
       <BannerStack />
+    </div>
     </div>
   );
 }
