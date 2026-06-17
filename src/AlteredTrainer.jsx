@@ -319,12 +319,22 @@ function PositionsTab({ root, labelMode, settings }) {
     const ctx = getCtx(), start = ctx.currentTime + 0.05, gap = 0.17;
     const seq = cells.map(c => OPEN_MIDI[c.s] + c.f).sort((a,b)=>a-b);
     seq.forEach((m, i) => pluck(ctx, midiToHz(m), start + i * gap));
-    // resolve: strum the I major7 / minor7 a perfect 4th above the V7alt root
+    // resolve: land on the nearest 3rd, then strum the I major7 / minor7
     if (kind !== 'off') {
-      const chordBase = rootMidi + 5;
+      const thirdIv = kind === 'maj' ? 4 : 3;
       const chord = kind === 'maj' ? [0,4,7,11] : [0,3,7,10];
-      const chordAt = start + seq.length * gap + 0.4;
-      chord.forEach((iv, j) => pluck(ctx, midiToHz(chordBase + iv), chordAt + j * 0.05));
+      // lowest root of the resolving chord in the current shape's register
+      let chordRoot = seq[0];
+      while (pc(chordRoot) !== targetRoot) chordRoot++;
+      // nearest 3rd to the last (highest) note played in the run
+      const last = seq[seq.length - 1], thirdPc = pc(targetRoot + thirdIv);
+      let down = last; while (pc(down) !== thirdPc) down--;
+      let up = last;   while (pc(up)   !== thirdPc) up++;
+      const third = (last - down) <= (up - last) ? down : up;
+      let t = start + seq.length * gap + 0.4;
+      pluck(ctx, midiToHz(third), t);              // resolve onto the 3rd
+      t += 0.55;                                    // brief pause, then the chord
+      chord.forEach((iv, j) => pluck(ctx, midiToHz(chordRoot + iv), t + j * 0.05));
     }
   };
   const playGuides = () => {
