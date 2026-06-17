@@ -225,7 +225,7 @@ function ExplorerTab({ root, labelMode }) {
   const subPc = (root + 6) % 12;
   const spelling = ALT.map(iv => ({ deg: ALT_LABEL[iv], note: NOTE_NAMES[pc(root + iv)] }));
   const rootMidi = 48 + root;
-  const playScale = () => playMidis([...ALT.map(i=>rootMidi+i), rootMidi+12]);
+  const playScale = () => playMidis([...ALT.map(i=>rootMidi+i), rootMidi+12], 0.2);
   const card = { background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:'12px 13px', marginBottom:12 };
   const h = { fontSize:11, color:'#888', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:6 };
   return (
@@ -314,7 +314,19 @@ function PositionsTab({ root, labelMode, settings }) {
   const thirdIv = kind === 'min' ? 3 : 4;
   const g3 = sdist(pc(root+4), targetRoot);             // 3 -> root of I
   const g7 = sdist(pc(root+10), pc(targetRoot+thirdIv)); // b7 -> 3rd of I
-  const playPos = () => playMidis(cells.map(c => OPEN_MIDI[c.s] + c.f).sort((a,b)=>a-b), 0.10);
+  const playPos = () => {
+    unlockAudio();
+    const ctx = getCtx(), start = ctx.currentTime + 0.05, gap = 0.17;
+    const seq = cells.map(c => OPEN_MIDI[c.s] + c.f).sort((a,b)=>a-b);
+    seq.forEach((m, i) => pluck(ctx, midiToHz(m), start + i * gap));
+    // resolve: strum the I major7 / minor7 a perfect 4th above the V7alt root
+    if (kind !== 'off') {
+      const chordBase = rootMidi + 5;
+      const chord = kind === 'maj' ? [0,4,7,11] : [0,3,7,10];
+      const chordAt = start + seq.length * gap + 0.4;
+      chord.forEach((iv, j) => pluck(ctx, midiToHz(chordBase + iv), chordAt + j * 0.05));
+    }
+  };
   const playGuides = () => {
     playMidis([rootMidi + 4, rootMidi + 4 + g3], 0.34);
     setTimeout(() => playMidis([rootMidi + 10, rootMidi + 10 + g7], 0.34), 850);
