@@ -51,6 +51,14 @@ developer + end user: Zak. Shared publicly via Ko-fi `syncopatedsyntax`.
   square = I chord tone you resolve to; square ringing a circle = scale note
   that's also a chord tone. Markers match the root's size unless overlapping a
   scale dot (then larger so the ring shows).
+- Diagram orientation: `ry(r)` = row 0 at top → row 5 at bottom. Dots/markers
+  use `cy = ry(5 - s)`, so string s=0 (low `E`) sits at the BOTTOM and s=5
+  (high `e`) at the TOP (standard horizontal fretboard view). String-name
+  labels must match this — render `STR_LABELS[r]` (the mapped element), NOT
+  `STR_LABELS[5-r]`, or the labels invert relative to the dots.
+- The Fretboard `<svg>` has `margin:0 auto` so every diagram centers in its
+  container (full-neck views wider than the container still scroll via the
+  parent's `overflowX:auto`).
 
 ## UX conventions (mobile-first; learned from ChordTrainer on iOS)
 - Phone-first. On desktop the app renders as a centered ~430px column.
