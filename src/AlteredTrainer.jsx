@@ -186,7 +186,7 @@ function Fretboard({ cells, root, labelMode, resolve, sc=1 }) {
       {Array.from({length:6},(_,r)=><line key={'s'+r} x1={padL} y1={ry(r)} x2={padL+nf*FW} y2={ry(r)} stroke="#2a2840" strokeWidth={1.4}/>)}
       {Array.from({length:nf+1},(_,j)=>{const f=lo+j;const nut=f===0;return <line key={'f'+j} x1={fxl(f)} y1={ry(0)} x2={fxl(f)} y2={ry(5)} stroke={nut?'#cccccc':'#2a2840'} strokeWidth={nut?3:1.4}/>;})}
       {[3,5,7,9,12,15].filter(f=>f>=lo&&f<=hi).map(f=><circle key={'m'+f} cx={fx(f)} cy={ry(2)+RH/2} r={2.6} fill="#2a2840"/>)}
-      {STR_LABELS.map((s,r)=><text key={'l'+r} x={6} y={ry(5-r)+3.5} fontSize={10} fill="#777" fontFamily="monospace">{STR_LABELS[5-r]}</text>)}
+      {STR_LABELS.map((s,r)=><text key={'l'+r} x={6} y={ry(5-r)+3.5} fontSize={10} fill="#777" fontFamily="monospace">{s}</text>)}
       {Array.from({length:nf},(_,j)=>{const f=lo+j;if(f===0)return null;return <text key={'n'+j} x={fx(f)} y={H-6} fontSize={9} fill="#666" textAnchor="middle" fontFamily="monospace">{f}</text>;})}
       {/* target chord tones — 3rd most prominent, root prominent, others muted */}
       {tmarks.map((t,i)=>{
