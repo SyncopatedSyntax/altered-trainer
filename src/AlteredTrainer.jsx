@@ -590,7 +590,7 @@ export default function App() {
   const CW = 600; // centered content max-width (matches ChordTrainer)
 
   return (
-    <div style={{ background:'#0f0e17', height:'100dvh', width:'100%', boxSizing:'border-box', display:'flex', flexDirection:'column', color:'#fffffe', fontFamily:"var(--font-body)", WebkitFontSmoothing:'antialiased', paddingTop:'env(safe-area-inset-top)' }}>
+    <div style={{ background:'#0f0e17', height:'100dvh', width:'100%', boxSizing:'border-box', display:'flex', flexDirection:'column', color:'#fffffe', fontFamily:"var(--font-body)", WebkitFontSmoothing:'antialiased' }}>
       <AppHeader toolKey="alt">
         <button className={`fw-header-btn${labelMode==='degrees'?' is-on':''}`} onClick={()=>setLabelMode(m=>m==='degrees'?'notes':'degrees')}>
           {labelMode==='degrees'?'✦ Degrees':'Note names'}
