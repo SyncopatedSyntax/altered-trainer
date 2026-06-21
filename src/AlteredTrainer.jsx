@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { AppHeader, TabBar } from "@fretworks/design";
 
 // ════════════════════════════════════════════════════════════════════════
 //  AlteredTrainer — learn the altered scale (7th mode of melodic minor)
@@ -182,7 +183,7 @@ function Fretboard({ cells, root, labelMode, resolve, sc=1 }) {
     }
   }
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width={W*sc} height={H*sc} style={{ display:'block', margin:'0 auto', maxWidth:'100%', height:'auto', userSelect:'none', WebkitUserSelect:'none' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} width={W*sc} height={H*sc} style={{ display:'block', margin:'0 auto', width:'auto', maxWidth:'100%', height:280, userSelect:'none', WebkitUserSelect:'none' }}>
       {Array.from({length:6},(_,r)=><line key={'s'+r} x1={padL} y1={ry(r)} x2={padL+nf*FW} y2={ry(r)} stroke="#2a2840" strokeWidth={1.4}/>)}
       {Array.from({length:nf+1},(_,j)=>{const f=lo+j;const nut=f===0;return <line key={'f'+j} x1={fxl(f)} y1={ry(0)} x2={fxl(f)} y2={ry(5)} stroke={nut?'#cccccc':'#2a2840'} strokeWidth={nut?3:1.4}/>;})}
       {[3,5,7,9,12,15].filter(f=>f>=lo&&f<=hi).map(f=><circle key={'m'+f} cx={fx(f)} cy={ry(2)+RH/2} r={2.6} fill="#2a2840"/>)}
@@ -574,38 +575,33 @@ export default function App() {
     setMeta('viewport','width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover');
     setMeta('apple-mobile-web-app-capable','yes');
     setMeta('apple-mobile-web-app-status-bar-style','black-translucent');
-    setMeta('apple-mobile-web-app-title','AlteredTrainer');
-    const manifest = { name:'AlteredTrainer', short_name:'Altered', description:'Learn the altered scale for jazz V7alt chords — shapes and resolutions.', start_url:'.', display:'standalone', orientation:'portrait', background_color:'#0f0e17', theme_color:'#0f0e17', icons:[{src:i180,sizes:'180x180',type:'image/png'},{src:i512,sizes:'512x512',type:'image/png'}] };
-    const blob = new Blob([JSON.stringify(manifest)],{type:'application/json'}); const murl = URL.createObjectURL(blob);
-    let mlink = document.querySelector('link[rel="manifest"]'); if(!mlink){mlink=document.createElement('link');mlink.rel='manifest';document.head.appendChild(mlink);} mlink.href = murl;
+    setMeta('apple-mobile-web-app-title','Fretworks');
+    // Single PWA: reference the unified shell manifest (one manifest per origin)
+    // instead of generating a competing per-app manifest.
+    let mlink = document.querySelector('link[rel="manifest"]'); if(!mlink){mlink=document.createElement('link');mlink.rel='manifest';document.head.appendChild(mlink);} mlink.href = '/manifest.webmanifest';
 
     window.scrollTo(0,0);
     const lock = () => { if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0,0); };
     window.addEventListener('scroll', lock, { passive:true });
-    return () => { document.head.removeChild(style); window.removeEventListener('scroll', lock); URL.revokeObjectURL(murl); };
+    return () => { document.head.removeChild(style); window.removeEventListener('scroll', lock); };
   }, []);
 
   const TABS = [{id:'explorer',label:'Explorer',icon:'🧭'},{id:'positions',label:'Positions',icon:'🎸'},{id:'settings',label:'Settings',icon:'⚙️'}];
+  const CW = 600; // centered content max-width (matches ChordTrainer)
 
   return (
-    <div style={{ background:'#08080d', height:'100dvh', display:'flex', justifyContent:'center' }}>
-    <div style={{ background:'#0f0e17', height:'100dvh', width:'100%', maxWidth:430, boxSizing:'border-box', borderLeft:'1px solid #1a1928', borderRight:'1px solid #1a1928', display:'flex', flexDirection:'column', color:'#fffffe', fontFamily:"'Segoe UI',system-ui,sans-serif", WebkitFontSmoothing:'antialiased', paddingTop:'env(safe-area-inset-top)' }}>
-      {/* header */}
-      <div style={{ padding:'10px 12px', borderBottom:'1px solid #1a1928', display:'flex', alignItems:'center', gap:8 }}>
-        <div style={{ display:'flex', flexDirection:'column' }}>
-          <div style={{ fontSize:16, fontWeight:900, lineHeight:1.1 }}>🎸 <span style={{ color:'#e17055' }}>Altered</span>Trainer</div>
-          <div style={{ fontSize:9, color:'#555', letterSpacing:'1px', paddingLeft:22 }}>jazz guitar toolbox</div>
-        </div>
-        <div style={{ marginLeft:'auto' }}>
-          <button onClick={()=>setLabelMode(m=>m==='degrees'?'notes':'degrees')}
-            style={{ padding:'7px 12px', borderRadius:9, cursor:'pointer', fontSize:11, fontWeight:700, border:`2px solid ${labelMode==='degrees'?'#ffd93d':'#555'}`, background:labelMode==='degrees'?'#ffd93d':'transparent', color:labelMode==='degrees'?'#111':'#bbb', minHeight:36, whiteSpace:'nowrap', touchAction:'manipulation' }}>
-            {labelMode==='degrees'?'✦ Degrees':'Note names'}
-          </button>
-        </div>
-      </div>
+    <div style={{ background:'#0f0e17', height:'100dvh', width:'100%', boxSizing:'border-box', display:'flex', flexDirection:'column', color:'#fffffe', fontFamily:"var(--font-body)", WebkitFontSmoothing:'antialiased', paddingTop:'env(safe-area-inset-top)' }}>
+      <AppHeader toolKey="alt">
+        <button className={`fw-header-btn${labelMode==='degrees'?' is-on':''}`} onClick={()=>setLabelMode(m=>m==='degrees'?'notes':'degrees')}>
+          {labelMode==='degrees'?'✦ Degrees':'Note names'}
+        </button>
+      </AppHeader>
 
-      {/* key selector: V7alt root <-> resolution key, kept in sync */}
-      <div style={{ padding:'8px 10px', borderBottom:'1px solid #1a1928' }}>
+      <TabBar toolKey="alt" tabs={TABS} active={tab} onChange={(id)=>{setTab(id); if(scrollRef.current)scrollRef.current.scrollTop=0;}} />
+
+      {/* key selector: V7alt root <-> resolution key — below the tabs, full-bleed border, centered inner */}
+      <div style={{ borderBottom:'1px solid #1a1928' }}>
+       <div style={{ padding:'8px 10px', maxWidth:CW, margin:'0 auto' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:7 }}>
           <div style={{ display:'flex', gap:5 }}>
             <button onClick={()=>setKeyMode('dom')} style={{ padding:'5px 10px', borderRadius:14, fontSize:11, fontWeight:700, cursor:'pointer', minHeight:30, border:`1px solid ${keyMode==='dom'?'#e17055':'#2a2840'}`, background:keyMode==='dom'?'#e17055':'transparent', color:keyMode==='dom'?'#fff':'#999', touchAction:'manipulation' }}>V7alt root</button>
@@ -627,19 +623,12 @@ export default function App() {
             );
           })}
         </div>
+       </div>
       </div>
 
-      {/* tabs */}
-      <div style={{ display:'flex', borderBottom:'1px solid #1a1928' }}>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>{setTab(t.id); if(scrollRef.current)scrollRef.current.scrollTop=0;}}
-            style={{ flex:1, padding:'11px 6px', background:'transparent', border:'none', cursor:'pointer', fontSize:11, fontWeight:700, color:tab===t.id?'#e17055':'#888', borderBottom:tab===t.id?'2px solid #e17055':'2px solid transparent', minHeight:44, touchAction:'manipulation' }}>{t.icon} {t.label}</button>
-        ))}
-      </div>
-
-      {/* content */}
+      {/* content — centered inner */}
       <div ref={scrollRef} style={{ flex:1, overflowY:'auto', WebkitOverflowScrolling:'touch', overscrollBehaviorY:'none' }}>
-        <div style={{ paddingBottom:'max(80px,env(safe-area-inset-bottom))' }}>
+        <div style={{ maxWidth:CW, margin:'0 auto', paddingBottom:'max(80px,env(safe-area-inset-bottom))' }}>
           {tab==='explorer' && <ExplorerTab root={root} labelMode={labelMode} />}
           {tab==='positions' && <PositionsTab root={root} labelMode={labelMode} settings={settings} />}
           {tab==='settings' && <SettingsTab settings={settings} onChange={setSettings} />}
@@ -647,7 +636,6 @@ export default function App() {
       </div>
 
       <BannerStack />
-    </div>
     </div>
   );
 }
