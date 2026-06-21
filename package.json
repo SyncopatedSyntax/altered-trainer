@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@fretworks/design": "git+https://github.com/SyncopatedSyntax/fretworks-design.git",
+    "@fretworks/design": "github:SyncopatedSyntax/fretworks-design",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
