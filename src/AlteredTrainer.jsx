@@ -89,7 +89,7 @@ const sdist = (a, b) => { let d = ((b - a) % 12 + 12) % 12; if (d > 6) d -= 12; 
 
 // resolution analysis: each altered tone -> target chord-tone half-step pulls
 const MAJ_TONES = {0:'R',4:'3',7:'5',11:'Δ7',2:'9',9:'13'};
-const MIN_TONES = {0:'R',3:'b3',7:'5',11:'Δ7',2:'9'};
+const MIN_TONES = {0:'R',3:'b3',7:'5',10:'b7',11:'Δ7',2:'9'};
 function getResolutions(root, kind) {  // kind: 'maj' | 'min' | 'sub'
   const targetRoot = (root + 5) % 12;
   const tones = kind === 'min' ? MIN_TONES : MAJ_TONES;  // sub resolves to I major
@@ -267,12 +267,12 @@ function ExplorerTab({ root, labelMode }) {
 }
 
 // ── Positions (with per-note resolution overlay) ────────────────────────
-const DEG_AVAIL = { maj:['R','3','5','Δ7','9','13'], min:['R','b3','5','Δ7','9'] };
+const DEG_AVAIL = { maj:['R','3','5','Δ7','9','13'], min:['R','b3','5','b7','Δ7','9'] };
 const dirLabel = d => d===0 ? 'common tone' : Math.abs(d)===1 ? (d<0?'down ½':'up ½') : (d<0?'down whole':'up whole');
 function PositionsTab({ root, labelMode, settings }) {
   const init = settings || {};
   const [system, setSystem] = useState(init.defSystem || 'caged');   // 'caged' | 'tnps'
-  const [idx, setIdx] = useState(0);
+  const [idx, setIdx] = useState(() => { try { const v = localStorage.getItem('at_pos'); if (v !== null) return parseInt(v, 10) || 0; } catch(e){} return 0; });
   const [fullNeck, setFullNeck] = useState(false);
   const [kind, setKind] = useState(init.defKind || 'maj');          // 'off' | 'maj' | 'min'
   const [sel, setSel] = useState(() => {
@@ -283,6 +283,7 @@ function PositionsTab({ root, labelMode, settings }) {
     if (ns.size === 0) { ns.add('R'); ns.add(k==='min'?'b3':'3'); }
     return ns;
   });
+  useEffect(() => { try { localStorage.setItem('at_pos', String(idx)); } catch(e){} }, [idx]);
   const positions = useMemo(() => system === 'caged' ? getCagedPositions(root) : getTnpsPositions(root), [system, root]);
   const i = Math.min(idx, positions.length - 1);
   const cur = positions[i];
@@ -484,9 +485,9 @@ function SettingsTab({ settings, onChange }) {
       <div style={card}>
         <div style={h}>Default target notes</div>
         <div style={{ display:'flex', flexWrap:'wrap', gap:7 }}>
-          {['R','3','5','Δ7','9','13'].map(d => <button key={d} onClick={()=>toggleNote(d)} style={chip(settings.defNotes.includes(d))}>{d}</button>)}
+          {DEG_AVAIL[settings.defKind === 'min' ? 'min' : 'maj'].map(d => <button key={d} onClick={()=>toggleNote(d)} style={chip(settings.defNotes.includes(d))}>{d}</button>)}
         </div>
-        <div style={{ fontSize:11, color:'#777', marginTop:8, lineHeight:1.5 }}>Over a minor target, the 3 shows as ♭3 automatically. 13 applies to major only.</div>
+        <div style={{ fontSize:11, color:'#777', marginTop:8, lineHeight:1.5 }}>{settings.defKind === 'min' ? 'Both ♭7 (standard minor) and Δ7 (melodic minor) are available.' : 'Over a minor target, the 3 shows as ♭3 automatically. 13 applies to major only.'}</div>
       </div>
 
       <div style={card}>
