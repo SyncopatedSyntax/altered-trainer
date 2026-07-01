@@ -2,8 +2,9 @@
 
 A single-file React PWA that teaches the **altered scale** (7th mode of melodic
 minor) for jazz V7alt chords: scale shapes + where lines resolve. Part of the
-**Jazz Guitar Toolbox** (sibling to ChordTrainer, MelodicMinorTrainer). Sole
-developer + end user: Zak. Shared publicly via Ko-fi `syncopatedsyntax`.
+**Fretworks** toolbox (sibling to ChordTrainer, DiatonicChordsTrainer,
+MelodicMinorTrainer, Circle of Fifths, Triad Trainer). Sole developer + end
+user: Zak. Shared publicly via Ko-fi `syncopatedsyntax`.
 
 ## Commands
 - `npm install` then `npm run dev` — local dev
