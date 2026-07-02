@@ -78,6 +78,14 @@ user: Zak. Shared publicly via Ko-fi `syncopatedsyntax`.
 - **Settings** — defaults (fingering, resolution, target notes, key-selector
   mode), reset install banner, Ko-fi button. (Key is remembered, not a default.)
 
+## Audio
+iOS silent-switch bypass: the toolbox-standard **two-layer fix** (audioSession
+'playback' on iOS 16.4+, plus a looping silent `<audio>` fallback for older
+iOS) sits at the top of the audio block; all play paths route through
+`unlockAudio()` (directly or via `playMidis()`). See root `CLAUDE.md → Audio`;
+reference implementation in `Chord-Trainer/App.jsx`. Don't regress to a
+fire-once MP3.
+
 ## Not built yet (roadmap)
 - Licks tab (canonical altered lines that land on the I), resolution quiz / SRS.
 

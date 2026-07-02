@@ -114,13 +114,28 @@ function getTargetTones(root, kind) {   // kind: 'maj' | 'min'
 
 // ── Audio (Web Audio pluck) ──────────────────────────────────────────────
 let _ctx = null, _unlocked = false;
+// ── iOS silent-switch bypass (toolbox standard, see root CLAUDE.md → Audio) ──
+// Layer 1 (iOS 16.4+): declare real media playback — Web Audio then ignores
+// the hardware ringer switch, same as the Music app. Feature-detected.
+try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+// Layer 2 (older iOS): the "playback" promotion from a real <audio> element
+// only holds while it is PLAYING, so keep a silent element looping for the
+// life of the page (a fire-once silent MP3 does not stick — don't regress).
+const SILENT_MP3 = 'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAFhpbmcAAAAPAAAAAwAAA7AAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tb////////////////////////////////////////////////////////////////AAAA8ExBTUUzLjk5LjVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=';
+let _silentLoop = null;
+function startSilentLoop() {
+  if (navigator.audioSession || !/iphone|ipad|ipod/i.test(navigator.userAgent)) return;
+  try {
+    if (!_silentLoop) { _silentLoop = new Audio(SILENT_MP3); _silentLoop.loop = true; }
+    if (_silentLoop.paused) { // must run inside a user gesture — callers are tap handlers
+      const p = _silentLoop.play(); if (p && p.catch) p.catch(() => { _silentLoop = null; });
+    }
+  } catch (e) { _silentLoop = null; }
+}
 function getCtx() { if (!_ctx) _ctx = new (window.AudioContext || window.webkitAudioContext)(); if (_ctx.state === 'suspended') _ctx.resume(); return _ctx; }
 function unlockAudio() {
+  startSilentLoop(); // re-checked every play: iOS pauses media on backgrounding
   if (_unlocked) return;
-  try {
-    const SILENT = 'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAFhpbmcAAAAPAAAAAwAAA7AAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tb////////////////////////////////////////////////////////////////AAAA8ExBTUUzLjk5LjVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=';
-    const a = new Audio(SILENT); a.volume = 0.001; const p = a.play(); if (p && p.then) p.then(()=>{}).catch(()=>{});
-  } catch (e) {}
   const ctx = getCtx();
   const buf = ctx.createBuffer(1,1,22050), src = ctx.createBufferSource();
   src.buffer = buf; src.connect(ctx.destination); src.start(0);
