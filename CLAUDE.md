@@ -84,7 +84,9 @@ iOS silent-switch bypass: the toolbox-standard **two-layer fix** (audioSession
 iOS) sits at the top of the audio block; all play paths route through
 `unlockAudio()` (directly or via `playMidis()`). See root `CLAUDE.md → Audio`;
 reference implementation in `Chord-Trainer/App.jsx`. Don't regress to a
-fire-once MP3.
+fire-once MP3. Also carries the shared bus + gentle limiter (`getBus()`) and
+idle-suspend (`bumpIdle()`, in both `playMidis` and `playPos`) — rapid taps
+don't swell, and iOS drops "now playing" once quiet (root `CLAUDE.md → Audio`).
 
 ## Not built yet (roadmap)
 - Licks tab (canonical altered lines that land on the I), resolution quiz / SRS.

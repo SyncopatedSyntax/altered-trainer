@@ -141,18 +141,44 @@ function unlockAudio() {
   src.buffer = buf; src.connect(ctx.destination); src.start(0);
   ctx.resume().then(() => { _unlocked = true; });
 }
+// Shared bus + gentle limiter so rapid overlapping notes don't stack/swell.
+let _bus = null;
+function getBus(ctx) {
+  if (!_bus || _bus.context !== ctx) {
+    const g = ctx.createGain(); g.gain.value = 1;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -10; comp.knee.value = 20; comp.ratio.value = 4;
+    comp.attack.value = 0.003; comp.release.value = 0.25;
+    g.connect(comp); comp.connect(ctx.destination);
+    _bus = g;
+  }
+  return _bus;
+}
+// Idle-suspend: release the audio session when quiet so iOS drops "now playing";
+// getCtx() resumes on the next play. (Toolbox audio standard — root CLAUDE.md.)
+let _idleTimer = null, _idleEnd = 0;
+function bumpIdle(ctx, end) {
+  _idleEnd = Math.max(_idleEnd, end);
+  if (_idleTimer) clearTimeout(_idleTimer);
+  _idleTimer = setTimeout(() => {
+    _idleTimer = null;
+    if (ctx.currentTime < _idleEnd - 0.05) return;
+    if (ctx.state === 'running') ctx.suspend().catch(() => {});
+  }, Math.max(0, (_idleEnd - ctx.currentTime) * 1000) + 400);
+}
 function pluck(ctx, freq, when, vol=0.16) {
   [[1,1.0],[2,0.45],[3,0.22],[4,0.09],[6,0.04]].forEach(([h,a]) => {
     const osc = ctx.createOscillator(), g = ctx.createGain(), filt = ctx.createBiquadFilter();
     osc.type='sine'; osc.frequency.value=freq*h; filt.type='lowpass'; filt.frequency.value=Math.min(3200,freq*h*3);
     g.gain.setValueAtTime(0,when); g.gain.linearRampToValueAtTime(vol*a,when+0.005); g.gain.exponentialRampToValueAtTime(0.0001,when+(h===1?1.6:0.9));
-    osc.connect(filt); filt.connect(g); g.connect(ctx.destination); osc.start(when); osc.stop(when+2);
+    osc.connect(filt); filt.connect(g); g.connect(getBus(ctx)); osc.start(when); osc.stop(when+2);
   });
 }
 function playMidis(midis, gap=0.12) {
   unlockAudio();
   const ctx = getCtx(), now = ctx.currentTime + 0.05;
   midis.forEach((m, i) => pluck(ctx, midiToHz(m), now + i * gap));
+  bumpIdle(ctx, now + (midis.length - 1) * gap + 2);
 }
 
 // ── Persistent storage (guarded; falls back to sandbox) ──────────────────
@@ -336,6 +362,7 @@ function PositionsTab({ root, labelMode, settings }) {
     const ctx = getCtx(), start = ctx.currentTime + 0.05, gap = 0.17;
     const seq = cells.map(c => OPEN_MIDI[c.s] + c.f).sort((a,b)=>a-b);
     seq.forEach((m, i) => pluck(ctx, midiToHz(m), start + i * gap));
+    let endT = start + (seq.length - 1) * gap + 2;
     // resolve: land on the nearest 3rd, then strum the I major7 / minor7
     if (kind !== 'off') {
       const thirdIv = kind === 'maj' ? 4 : 3;
@@ -352,7 +379,9 @@ function PositionsTab({ root, labelMode, settings }) {
       pluck(ctx, midiToHz(third), t);              // resolve onto the 3rd
       t += 0.55;                                    // brief pause, then the chord
       chord.forEach((iv, j) => pluck(ctx, midiToHz(chordRoot + iv), t + j * 0.05));
+      endT = t + (chord.length - 1) * 0.05 + 2;
     }
+    bumpIdle(ctx, endT);
   };
   const playGuides = () => {
     playMidis([rootMidi + 4, rootMidi + 4 + g3], 0.34);
