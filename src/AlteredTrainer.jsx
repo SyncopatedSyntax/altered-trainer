@@ -50,17 +50,44 @@ function transposeCaged(pat, parentPc) {
   while (mn < 0)   { cells.forEach(c => c.f += 12); mn += 12; }
   return cells;
 }
+// ── Stable shape identity ────────────────────────────────────────────────
+// The CAGED_MM index IS the shape's identity: transposing only shifts frets,
+// never degrees, so pattern 2 is the same grip in every key.
+//
+// It did not used to be labelled that way. The old code sorted the five shapes
+// by lowest fret and only THEN named them `Position ${i+1}` — but the sort is a
+// cyclic rotation that depends on the parent key, so "Position 3" meant a
+// different shape in C than in G, and changing key silently swapped the shape
+// under a label that had not changed. That is fatal for anything that tracks
+// what you know, and it is the likeliest reason a shape felt impossible to
+// settle on.
+//
+// So the number now comes from the pattern and travels with it. The list is
+// still returned in neck order, so the arrows still walk up the neck — which
+// means in a given key they may read 3, 4, 5, 1, 2. That is honest: the five
+// shapes are a cycle, and which one sits lowest depends on the key.
+//
+// Position 1 is the shape whose lowest note on the low E is the root — the
+// index-finger-on-the-root grip, and the anchor everything else refers back to.
+// The five anchors then ascend through the scale: R, #9, #11, b13, b7.
+// scripts/verify.mjs pins all of this.
+const SHAPE_ORDER = [2, 3, 4, 0, 1];                    // position (1-based) -> CAGED_MM index
+const SHAPE_NUM   = [4, 5, 1, 2, 3];                    // CAGED_MM index -> position
+const SHAPE_ANCHOR = ['b13', 'b7', 'R', '#9', '#11'];   // CAGED_MM index -> its lowest low-E degree
+
 // 5 altered positions for a given altered root, ordered low->high on the neck
 function getCagedPositions(root) {
   const parentPc = (root + 1) % 12;
-  const list = CAGED_MM.map(pat => {
+  const list = CAGED_MM.map((pat, idx) => {
     const cells = transposeCaged(pat, parentPc);
     const fs = cells.map(c => c.f);
-    return { cells, lo: Math.min(...fs), hi: Math.max(...fs) };
+    return { idx, num: SHAPE_NUM[idx], name: `Position ${SHAPE_NUM[idx]}`, start: SHAPE_ANCHOR[idx],
+             cells, lo: Math.min(...fs), hi: Math.max(...fs) };
   });
-  list.sort((a,b) => a.lo - b.lo);
-  return list.map((p,i) => ({ ...p, name: `Position ${i+1}` }));
+  return list.sort((a,b) => a.lo - b.lo);   // sorting reorders, it no longer renames
 }
+const getCagedShape = (root, num) => getCagedPositions(root).find(p => p.num === num) || null;
+const neckIndexOfNum = (positions, num) => Math.max(0, positions.findIndex(p => p.num === num));
 // 7 three-notes-per-string patterns for a given altered root
 function getTnpsPositions(root) {
   const scale = new Set(ALT.map(i => pc(root + i)));
@@ -182,6 +209,26 @@ function playMidis(midis, gap=0.12) {
 }
 
 // ── Persistent storage (guarded; falls back to sandbox) ──────────────────
+// Sync JSON accessor for the structured progress data. It sits alongside the
+// async string `store` below rather than replacing it — the older raw-string
+// prefs still load through that one, and grading happens inside a tap handler
+// where an async write would race the queue advancing.
+const jstore = {
+  get(k, dflt) { try { const v = localStorage.getItem(k); return v === null ? dflt : JSON.parse(v); } catch (e) { return dflt; } },
+  set(k, v) {
+    const s = JSON.stringify(v);
+    try { localStorage.setItem(k, s); } catch (e) {}
+    try { if (typeof window.storage !== 'undefined') window.storage.set(k, s); } catch (e) {}
+  },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+
+// ProgressBackup JSON-parses on export and always JSON-stringifies on import,
+// so a value stored as a bare string comes back wrapped in quotes. Accept raw,
+// JSON, and double-encoded forms on the way in; everything is written as JSON
+// from here on.
+const unq = v => { let out = String(v); try { const p = JSON.parse(out); if (typeof p === 'string' || typeof p === 'number') out = String(p); } catch (e) {} return out; };
+
 const store = {
   async get(k) { try { const v = localStorage.getItem(k); if (v !== null) return { value: v }; } catch (e) {} try { if (typeof window.storage !== 'undefined') { const r = await window.storage.get(k); if (r) return r; } } catch (e) {} return null; },
   async set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} try { if (typeof window.storage !== 'undefined') await window.storage.set(k, v); } catch (e) {} },
@@ -310,10 +357,12 @@ function ExplorerTab({ root, labelMode }) {
 // ── Positions (with per-note resolution overlay) ────────────────────────
 const DEG_AVAIL = { maj:['R','3','5','Δ7','9','13'], min:['R','b3','5','b7','Δ7','9'] };
 const dirLabel = d => d===0 ? 'common tone' : Math.abs(d)===1 ? (d<0?'down ½':'up ½') : (d<0?'down whole':'up whole');
-function PositionsTab({ root, labelMode, settings }) {
+function PositionsTab({ root, labelMode, settings, shapeNum, onShapeNum }) {
   const init = settings || {};
   const [system, setSystem] = useState(init.defSystem || 'caged');   // 'caged' | 'tnps'
-  const [idx, setIdx] = useState(() => { try { const v = localStorage.getItem('at_pos'); if (v !== null) return parseInt(v, 10) || 0; } catch(e){} return 0; });
+  // The CAGED shape lives in App (as a stable number); the tnps track keeps its
+  // own cursor. They used to share one key, which meant nothing across systems.
+  const [tnpsIdx, setTnpsIdx] = useState(0);
   const [fullNeck, setFullNeck] = useState(false);
   const [kind, setKind] = useState(init.defKind || 'maj');          // 'off' | 'maj' | 'min'
   const [sel, setSel] = useState(() => {
@@ -324,10 +373,15 @@ function PositionsTab({ root, labelMode, settings }) {
     if (ns.size === 0) { ns.add('R'); ns.add(k==='min'?'b3':'3'); }
     return ns;
   });
-  useEffect(() => { try { localStorage.setItem('at_pos', String(idx)); } catch(e){} }, [idx]);
   const positions = useMemo(() => system === 'caged' ? getCagedPositions(root) : getTnpsPositions(root), [system, root]);
-  const i = Math.min(idx, positions.length - 1);
+  const i = system === 'caged' ? neckIndexOfNum(positions, shapeNum) : Math.min(tnpsIdx, positions.length - 1);
   const cur = positions[i];
+  // Arrows step through the neck; for CAGED that writes back the shape's stable
+  // number, so the label follows the shape rather than the slot.
+  const step = d => {
+    const n = (i + d + positions.length) % positions.length;
+    if (system === 'caged') onShapeNum(positions[n].num); else setTnpsIdx(n);
+  };
   const cells = fullNeck ? getFullNeck(root) : cur.cells;
   const targetRoot = (root + 5) % 12;
   const targetName = kind === 'min' ? `${NOTE_NAMES[targetRoot]}m` : `${NOTE_NAMES[targetRoot]}maj7`;
@@ -396,8 +450,8 @@ function PositionsTab({ root, labelMode, settings }) {
   return (
     <div style={{ padding:'14px 12px' }}>
       <div style={{ display:'flex', gap:6, marginBottom:8 }}>
-        <button onClick={()=>{setSystem('caged');setIdx(0);}} style={segBtn(system==='caged')}>5 Positions</button>
-        <button onClick={()=>{setSystem('tnps');setIdx(0);}} style={segBtn(system==='tnps')}>3 notes/string</button>
+        <button onClick={()=>setSystem('caged')} style={segBtn(system==='caged')}>5 Positions</button>
+        <button onClick={()=>{setSystem('tnps');setTnpsIdx(0);}} style={segBtn(system==='tnps')}>3 notes/string</button>
       </div>
 
       {/* resolution target chord */}
@@ -420,7 +474,7 @@ function PositionsTab({ root, labelMode, settings }) {
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:6 }}>
         <div style={{ fontSize:13, fontWeight:800, color:'#fff' }}>
           {fullNeck ? 'Full neck' : cur.name}
-          {!fullNeck && <span style={{ color:'#888', fontWeight:600, fontSize:11 }}> · frets {cur.lo}–{cur.hi}{cur.start?` · starts on ${cur.start}`:''}</span>}
+          {!fullNeck && <span style={{ color:'#888', fontWeight:600, fontSize:11 }}> · starts on {cur.start} · frets {cur.lo}–{cur.hi}</span>}
         </div>
         <button onClick={()=>setFullNeck(f=>!f)} style={{ background:fullNeck?'#74b9ff':'transparent', color:fullNeck?'#111':'#74b9ff', border:'1px solid #74b9ff55', borderRadius:7, padding:'6px 11px', fontSize:11, fontWeight:700, cursor:'pointer', minHeight:34, touchAction:'manipulation' }}>{fullNeck?'◧ Full neck':'◫ Full neck'}</button>
       </div>
@@ -431,9 +485,11 @@ function PositionsTab({ root, labelMode, settings }) {
 
       {!fullNeck && (
         <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:12, marginTop:10 }}>
-          <button onClick={()=>setIdx((i - 1 + positions.length) % positions.length)} style={navBtn}>‹</button>
-          <div style={{ fontSize:12, color:'#888', minWidth:64, textAlign:'center' }}>{i+1} / {positions.length}</div>
-          <button onClick={()=>setIdx((i + 1) % positions.length)} style={navBtn}>›</button>
+          <button onClick={()=>step(-1)} style={navBtn}>‹</button>
+          <div style={{ fontSize:12, color:'#888', minWidth:96, textAlign:'center' }}>
+            {cur.name}<br /><span style={{ fontSize:10, color:'#666' }}>{i+1}{['st','nd','rd','th','th'][i]||'th'} on the neck</span>
+          </div>
+          <button onClick={()=>step(1)} style={navBtn}>›</button>
         </div>
       )}
 
@@ -582,17 +638,48 @@ export default function App() {
   const [tab, setTab] = useState('positions');
   const [keyMode, setKeyMode] = useState('dom'); // 'dom' (V7alt root) | 'tonic' (resolution key)
   const [settings, setSettings] = useState({ defSystem:'caged', defKind:'maj', defNotes:['R','3'], defKeyMode:'dom' });
+  // Which CAGED shape you are on, as a stable position number (1-5). Lives here
+  // rather than in PositionsTab because Practice has to agree with it, and
+  // because migrating the old at_pos needs the restored key.
+  const [shapeNum, setShapeNum] = useState(1);
+  const prefsLoaded = useRef(false);
   const scrollRef = useRef(null);
 
   // load prefs
   useEffect(() => { (async () => {
-    try { const r = await store.get('at_root'); if (r) setRoot(parseInt(r.value,10)); } catch(e){}
-    try { const l = await store.get('at_label'); if (l) setLabelMode(l.value); } catch(e){}
+    // Guarded: a corrupt at_root used to give setRoot(NaN), which collapses
+    // every position computation downstream.
+    try { const r = await store.get('at_root'); if (r) { const n = parseInt(unq(r.value),10); if (Number.isFinite(n) && n >= 0 && n < 12) setRoot(n); } } catch(e){}
+    try { const l = await store.get('at_label'); if (l) setLabelMode(unq(l.value) === 'notes' ? 'notes' : 'degrees'); } catch(e){}
     try { const s = await store.get('at_settings'); if (s) setSettings(prev => ({ ...prev, ...JSON.parse(s.value) })); } catch(e){}
+    // at_pos held a NECK index (0-6). Its range overlaps the new stable numbers
+    // (1-5), so it cannot be reinterpreted — convert it once, in the key it was
+    // recorded in, so the shape actually on screen is the one preserved.
+    try {
+      let num = jstore.get('at_shape', null);
+      if (num == null) {
+        let legacy = null;
+        try { const v = localStorage.getItem('at_pos'); if (v !== null) legacy = parseInt(v, 10); } catch(e){}
+        const r = await store.get('at_root');
+        const rootNow = r ? (parseInt(unq(r.value),10) || 0) : 7;
+        const positions = getCagedPositions(rootNow);
+        num = Number.isFinite(legacy)
+          ? positions[Math.min(Math.max(legacy, 0), positions.length - 1)].num
+          : 1;
+        jstore.set('at_shape', num);
+        jstore.del('at_pos');
+      }
+      if (num >= 1 && num <= 5) setShapeNum(num);
+    } catch(e){}
+    prefsLoaded.current = true;
   })(); }, []);
   useEffect(() => { store.set('at_root', String(root)); }, [root]);
-  useEffect(() => { store.set('at_label', labelMode); }, [labelMode]);
+  useEffect(() => { store.set('at_label', JSON.stringify(labelMode)); }, [labelMode]);
   useEffect(() => { store.set('at_settings', JSON.stringify(settings)); }, [settings]);
+  // Gated on the load: this effect also runs on mount, and without the guard it
+  // would write the default 1 over a stored value before the async read above
+  // has got to it.
+  useEffect(() => { if (prefsLoaded.current) jstore.set('at_shape', shapeNum); }, [shapeNum]);
   useEffect(() => { setKeyMode(settings.defKeyMode === 'tonic' ? 'tonic' : 'dom'); }, [settings.defKeyMode]);
 
   // PWA: manifest, icon, theme, iOS scroll fix
@@ -675,7 +762,7 @@ export default function App() {
       <div ref={scrollRef} style={{ flex:1, overflowY:'auto', WebkitOverflowScrolling:'touch', overscrollBehaviorY:'none' }}>
         <div style={{ maxWidth:CW, margin:'0 auto', paddingBottom:'max(80px,env(safe-area-inset-bottom))' }}>
           {tab==='explorer' && <ExplorerTab root={root} labelMode={labelMode} />}
-          {tab==='positions' && <PositionsTab root={root} labelMode={labelMode} settings={settings} />}
+          {tab==='positions' && <PositionsTab root={root} labelMode={labelMode} settings={settings} shapeNum={shapeNum} onShapeNum={setShapeNum} />}
           {tab==='settings' && <SettingsTab settings={settings} onChange={setSettings} />}
         </div>
       </div>
