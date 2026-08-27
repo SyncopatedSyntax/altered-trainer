@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { AppHeader, TabBar } from "@fretworks/design";
+import { AppHeader, TabBar, ProgressBackup } from "@fretworks/design";
 
 // ════════════════════════════════════════════════════════════════════════
 //  AlteredTrainer — learn the altered scale (7th mode of melodic minor)
@@ -139,6 +139,98 @@ function getTargetTones(root, kind) {   // kind: 'maj' | 'min'
   return { targetRoot: tr, tones: map };
 }
 
+// ── Practice: shapes, drills, spaced repetition ──────────────────────────
+// SM-2 copied verbatim from triads-trainer/src/TriadTrainer.jsx:32-46, which is
+// byte-identical to Diatonic's. Do not re-derive it; a fix in one should be
+// carried to all three.
+const todayStr = () => new Date().toISOString().slice(0,10);
+const addDays = (s,n) => { const d = new Date(s+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+const dayDiff = (a,b) => Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00'))/86400000);
+function updateSRS(card, correct) {
+  const ef = card?.ef ?? 2.5, reps = card?.reps ?? 0, interval = card?.interval ?? 1;
+  if (correct) {
+    const nef = Math.min(2.5, Math.max(1.3, ef + 0.1));
+    const nreps = reps + 1;
+    const nint = nreps === 1 ? 1 : nreps === 2 ? 6 : Math.round(interval * nef);
+    return { ef: nef, interval: nint, reps: nreps, nextDue: addDays(todayStr(), nint) };
+  }
+  return { ef: Math.max(1.3, ef - 0.2), interval: 1, reps: 0, nextDue: addDays(todayStr(), 1) };
+}
+const isLearned = c => !!c && c.reps >= 2;
+const ri = n => Math.floor(Math.random()*n);
+const shuffle = a => { const b=[...a]; for (let i=b.length-1;i>0;i--){const j=ri(i+1);[b[i],b[j]]=[b[j],b[i]];} return b; };
+const popcount = n => { let c=0; while(n){ n &= n-1; c++; } return c; };
+
+// The three drills. All of them are about the one thing this app is for: an
+// altered shape is a launch pad into the I chord.
+//
+// `ires` and `ithird` are answered on frets with NO dot - both targets are
+// outside the altered scale - so they cannot be read off a label.
+//
+// `ithird` is MAJOR-ONLY and must not follow settings.defKind. Over a minor I
+// the third is root+8, which IS in the scale (it is the b13); it would sit
+// under an existing dot and destroy the premise. verify.mjs pins this.
+const DRILLS = ['root','ires','ithird'];
+const DRILL_META = {
+  root:   { label:'The root',    short:'Root',     ask:'Tap the root of the altered scale.' },
+  ires:   { label:'Resolves to', short:'Resolves', ask:'Tap the root of the key it resolves to.' },
+  ithird: { label:'Lands on',    short:'Lands on', ask:'The b7 falls a half step. Tap where it lands.' },
+};
+const cardId = (num, drill) => `${num}|${drill}`;
+const buildCards = drills => { const out=[]; for (let num=1;num<=5;num++) for (const d of drills) out.push({ id:cardId(num,d), shape:num, drill:d }); return out; };
+
+const ckey = (st,f) => st+'_'+f;
+// Every acceptable answer, plus (for the root drill) the near misses that are
+// the right note in the wrong place. Any matching cell counts - "identify the
+// root" means point at one, and there are always several.
+function answerSet(drill, shape, root, win) {
+  const ok = new Set(), near = new Set();
+  if (drill === 'root') {
+    shape.cells.filter(c => c.deg==='R').forEach(c => ok.add(ckey(c.s,c.f)));
+    for (let st=0;st<6;st++) for (let f=win.lo;f<=win.hi;f++)
+      if (pc(OPEN_MIDI[st]+f)===root && !ok.has(ckey(st,f))) near.add(ckey(st,f));
+    return { ok, near };
+  }
+  const tp = pc(root + (drill==='ires' ? 5 : 9));
+  for (let st=0;st<6;st++) for (let f=win.lo;f<=win.hi;f++) if (pc(OPEN_MIDI[st]+f)===tp) ok.add(ckey(st,f));
+  return { ok, near };
+}
+const winOf = sh => ({ lo: Math.max(0, sh.lo-1), hi: sh.hi+1 });
+
+// Where one shape stands. Two different bars on purpose: `mastered` uses the
+// toolbox's isLearned so the chip means what it means in every sibling app,
+// while promotion is stricter. With a random key every rep, reps>=2 can be
+// earned twice in one sitting in two keys - which is not knowing a shape. The
+// 12-bit keysSeen mask is what makes "across N keys" measurable.
+const READY_REPS = 3, READY_KEYS = 6;
+function shapeProgress(num, srs, drills) {
+  const st = drills.map(d => srs[cardId(num,d)]);
+  const td = todayStr();
+  const mastered = st.filter(isLearned).length;
+  const nw = st.filter(c => !c).length;
+  const due = st.filter(c => c && dayDiff(td, c.nextDue) <= 0).length;
+  const keys = st.reduce((m,c) => m & (c?.keysSeen ?? 0), 0xFFF);
+  const keyCount = popcount(keys);
+  const ready = st.every(c => (c?.reps ?? 0) >= READY_REPS) && keyCount >= READY_KEYS;
+  return { mastered, total: drills.length, nw, due, keyCount, ready };
+}
+
+// Three tiers, not two. A focus deck is 2-3 cards; with due-then-new only, a
+// session would end after three taps. The modulo cycle keeps it going so the
+// same shape comes round several times in DIFFERENT keys, which is the whole
+// point of drilling one shape.
+function buildQueue(cards, srs, count, pickKey) {
+  const td = todayStr();
+  const due  = shuffle(cards.filter(c =>  srs[c.id] && dayDiff(td, srs[c.id].nextDue) <= 0));
+  const nw   = shuffle(cards.filter(c => !srs[c.id]));
+  const rest = shuffle(cards.filter(c =>  srs[c.id] && dayDiff(td, srs[c.id].nextDue) >  0));
+  const pool = [...due, ...nw, ...rest];
+  if (!pool.length) return [];
+  const q = [];
+  while (q.length < count) q.push(pool[q.length % pool.length]);
+  return q.map(c => ({ ...c, root: pickKey() }));
+}
+
 // ── Audio (Web Audio pluck) ──────────────────────────────────────────────
 let _ctx = null, _unlocked = false;
 // ── iOS silent-switch bypass (toolbox standard, see root CLAUDE.md → Audio) ──
@@ -250,11 +342,30 @@ function targetStyle(deg, thirdDeg) {
   if (deg === 'R')      return { stroke:'#2dd4bf', text:'#2dd4bf', sw:2.4, solid:false, big:false }; // root: bright teal outline
   return { stroke:'#3f7d74', text:'#6fb6ab', sw:1.4, solid:false, big:false };                       // others: muted teal
 }
-function Fretboard({ cells, root, labelMode, resolve, sc=1 }) {
+// Drill props (all optional, all no-ops when omitted, so the Positions view is
+// byte-identical without them):
+//   mono         every dot one flat grey, no root ring, no label — the answer
+//                cannot be read off the diagram. DC['R'] is bright red, so the
+//                root drill is meaningless without this.
+//   hideLabels   keep the degree colours but drop the text (a gentler step).
+//   highlight    Set of "s_f"; members pulse, everything else dims. Ported from
+//                MelodicMinorTrainer. Exact cell match, not by degree, so a
+//                duplicate of the same note elsewhere stays quiet.
+//   onTapCell    (s,f) => void. See the grid at the bottom of the svg.
+//   marks        [{s,f,kind:'ok'|'bad'|'reveal'}] answer feedback.
+//   win          {lo,hi} overriding the window derived from the cells. Load
+//                bearing: the answer set and the drawn board MUST share one
+//                window or an accepted answer can land off-screen.
+//   rowH / fill  taller rows and a width-driven layout, for 44px tap targets.
+function Fretboard({ cells, root, labelMode, resolve, sc=1,
+                     mono, hideLabels, highlight, onTapCell, marks, win, rowH=27, fill }) {
   if (!cells.length) return null;
   const fs = cells.map(c => c.f);
-  let lo = Math.max(0, Math.min(...fs) - 1), hi = Math.max(...fs) + 1;
-  const FW=36, RH=27, padL=22, padT=14, padB=20, padR=10, nf=hi-lo+1;
+  let lo = win ? win.lo : Math.max(0, Math.min(...fs) - 1), hi = win ? win.hi : Math.max(...fs) + 1;
+  const FW=36, RH=rowH, padL=22, padT=14, padB=20, padR=10, nf=hi-lo+1;
+  const hl = highlight || null;
+  const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const MARK_COLOR = { ok:'#2ed573', bad:'#ef4444', reveal:'#2dd4bf' };
   const W = padL + nf*FW + padR, H = padT + 6*RH + padB;
   const fx = f => padL + (f - lo + 0.5)*FW, fxl = f => padL + (f - lo)*FW, ry = r => padT + r*RH;
   const dotMidi = c => OPEN_MIDI[c.s] + c.f;
@@ -271,7 +382,9 @@ function Fretboard({ cells, root, labelMode, resolve, sc=1 }) {
     }
   }
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width={W*sc} height={H*sc} style={{ display:'block', margin:'0 auto', width:'auto', maxWidth:'100%', height:280, userSelect:'none', WebkitUserSelect:'none' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={fill
+      ? { display:'block', margin:'0 auto', width:'100%', height:'auto', userSelect:'none', WebkitUserSelect:'none', touchAction:'manipulation' }
+      : { display:'block', margin:'0 auto', width:'auto', maxWidth:'100%', height:280, userSelect:'none', WebkitUserSelect:'none' }}>
       {Array.from({length:6},(_,r)=><line key={'s'+r} x1={padL} y1={ry(r)} x2={padL+nf*FW} y2={ry(r)} stroke="#2a2840" strokeWidth={1.4}/>)}
       {Array.from({length:nf+1},(_,j)=>{const f=lo+j;const nut=f===0;return <line key={'f'+j} x1={fxl(f)} y1={ry(0)} x2={fxl(f)} y2={ry(5)} stroke={nut?'#cccccc':'#2a2840'} strokeWidth={nut?3:1.4}/>;})}
       {[3,5,7,9,12,15].filter(f=>f>=lo&&f<=hi).map(f=><circle key={'m'+f} cx={fx(f)} cy={ry(2)+RH/2} r={2.6} fill="#2a2840"/>)}
@@ -288,11 +401,41 @@ function Fretboard({ cells, root, labelMode, resolve, sc=1 }) {
           {!t.shared && <text x={cx} y={cy+0.5} fontSize={L.length>2?7:9.5} fill={st.solid?st.text:st.stroke} textAnchor="middle" dominantBaseline="central" fontWeight="bold">{L}</text>}
         </g>);})}
       {/* altered-scale dots on top */}
-      {cells.map((c,i)=>{const col=DC[c.deg]||'#888',cx=fx(c.f),cy=ry(5-c.s),L=lbl(c);return (
-        <g key={i}>
-          <circle cx={cx} cy={cy} r={11} fill={col} stroke={isRoot(c)?'#fff':'none'} strokeWidth={isRoot(c)?2:0}/>
-          <text x={cx} y={cy+0.5} fontSize={L.length>2?7:9} fill={txtOn(col)} textAnchor="middle" dominantBaseline="central" fontWeight="bold">{L}</text>
+      {cells.map((c,i)=>{
+        const col = mono ? '#4a4a6a' : (DC[c.deg]||'#888');
+        const cx=fx(c.f), cy=ry(5-c.s), L=lbl(c);
+        const lit = !hl || hl.has(c.s+'_'+c.f), dim = hl && !lit;
+        return (
+        <g key={i} opacity={dim?0.28:1}>
+          <circle cx={cx} cy={cy} r={11} fill={col} stroke={(!mono&&isRoot(c))?'#fff':'none'} strokeWidth={(!mono&&isRoot(c))?2:0}>
+            {hl && lit && !reduced && <animate attributeName="r" values="11;13.5;11" dur="1.1s" repeatCount="indefinite"/>}
+          </circle>
+          {!mono && !hideLabels && <text x={cx} y={cy+0.5} fontSize={L.length>2?7:9} fill={txtOn(col)} textAnchor="middle" dominantBaseline="central" fontWeight="bold">{L}</text>}
         </g>);})}
+
+      {/* Answer feedback, painted over the dots but under the tap grid. */}
+      {(marks||[]).map((m,i)=>{const cx=fx(m.f), cy=ry(5-m.s), col=MARK_COLOR[m.kind]||'#fff';
+        if (m.kind==='bad') return (
+          <g key={'m'+i} pointerEvents="none" stroke={col} strokeWidth={3} strokeLinecap="round">
+            <line x1={cx-8} y1={cy-8} x2={cx+8} y2={cy+8}/><line x1={cx+8} y1={cy-8} x2={cx-8} y2={cy+8}/>
+          </g>);
+        return <circle key={'m'+i} pointerEvents="none" cx={cx} cy={cy} r={15} fill="none" stroke={col}
+          strokeWidth={m.kind==='ok'?3:2.2} strokeDasharray={m.kind==='reveal'?'4 3':undefined}/>;})}
+
+      {/* Tap grid — last child on purpose. SVG has no z-index, so paint order
+          decides hit testing, and a transparent fill still receives events.
+          It must cover the whole window rather than just the dots: two of the
+          three drills are answered on a fret with no dot on it. */}
+      {onTapCell && (
+        <g>
+          {Array.from({length:6}).flatMap((_,st)=>Array.from({length:nf}).map((_,j)=>{
+            const f = lo+j;
+            return <rect key={`t${st}_${f}`} x={fxl(f)} y={ry(5-st)-RH/2} width={FW} height={RH}
+              fill="transparent" style={{ cursor:'pointer', touchAction:'manipulation' }}
+              onClick={()=>onTapCell(st,f)} />;
+          }))}
+        </g>
+      )}
     </svg>
   );
 }
@@ -357,7 +500,7 @@ function ExplorerTab({ root, labelMode }) {
 // ── Positions (with per-note resolution overlay) ────────────────────────
 const DEG_AVAIL = { maj:['R','3','5','Δ7','9','13'], min:['R','b3','5','b7','Δ7','9'] };
 const dirLabel = d => d===0 ? 'common tone' : Math.abs(d)===1 ? (d<0?'down ½':'up ½') : (d<0?'down whole':'up whole');
-function PositionsTab({ root, labelMode, settings, shapeNum, onShapeNum }) {
+function PositionsTab({ root, labelMode, settings, shapeNum, onShapeNum, focusNum, onFocus, onPractise }) {
   const init = settings || {};
   const [system, setSystem] = useState(init.defSystem || 'caged');   // 'caged' | 'tnps'
   // The CAGED shape lives in App (as a stable number); the tnps track keeps its
@@ -474,6 +617,8 @@ function PositionsTab({ root, labelMode, settings, shapeNum, onShapeNum }) {
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:6 }}>
         <div style={{ fontSize:13, fontWeight:800, color:'#fff' }}>
           {fullNeck ? 'Full neck' : cur.name}
+          {!fullNeck && system==='caged' && cur.num===focusNum &&
+            <span style={{ marginLeft:6, fontSize:10, fontWeight:800, color:'#e17055', border:'1px solid #e1705566', borderRadius:12, padding:'2px 7px' }}>FOCUS</span>}
           {!fullNeck && <span style={{ color:'#888', fontWeight:600, fontSize:11 }}> · starts on {cur.start} · frets {cur.lo}–{cur.hi}</span>}
         </div>
         <button onClick={()=>setFullNeck(f=>!f)} style={{ background:fullNeck?'#74b9ff':'transparent', color:fullNeck?'#111':'#74b9ff', border:'1px solid #74b9ff55', borderRadius:7, padding:'6px 11px', fontSize:11, fontWeight:700, cursor:'pointer', minHeight:34, touchAction:'manipulation' }}>{fullNeck?'◧ Full neck':'◫ Full neck'}</button>
@@ -493,8 +638,13 @@ function PositionsTab({ root, labelMode, settings, shapeNum, onShapeNum }) {
         </div>
       )}
 
-      <div style={{ display:'flex', justifyContent:'center', marginTop:12 }}>
+      <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12, flexWrap:'wrap' }}>
         <PlayBtn onClick={playPos} label="▶ Play this shape" />
+        {!fullNeck && system==='caged' && (
+          cur.num === focusNum
+            ? <button onClick={onPractise} style={{ background:'#e17055', color:'#fff', border:'none', borderRadius:7, padding:'7px 13px', fontSize:12, fontWeight:700, cursor:'pointer', minHeight:38, touchAction:'manipulation' }}>Practise this</button>
+            : <button onClick={()=>onFocus(cur.num)} style={{ background:'transparent', color:'#e17055', border:'1px solid #e1705555', borderRadius:7, padding:'7px 13px', fontSize:12, fontWeight:700, cursor:'pointer', minHeight:38, touchAction:'manipulation' }}>Make this my focus</button>
+        )}
       </div>
 
       {kind !== 'off' && (
@@ -530,8 +680,16 @@ function PositionsTab({ root, labelMode, settings, shapeNum, onShapeNum }) {
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────
-function SettingsTab({ settings, onChange }) {
+function SettingsTab({ settings, onChange, onResetProgress }) {
   const set = patch => onChange({ ...settings, ...patch });
+  const [confirmReset, setConfirmReset] = useState(false);
+  const drills = (settings.drills && settings.drills.length) ? settings.drills : ['root','ires'];
+  const toggleDrill = d => {
+    const s = new Set(drills);
+    s.has(d) ? s.delete(d) : s.add(d);
+    if (!s.size) return;              // at least one drill, or Practice has nothing to ask
+    set({ drills: DRILLS.filter(x => s.has(x)) });
+  };
   const toggleNote = d => { const s = new Set(settings.defNotes); s.has(d) ? s.delete(d) : s.add(d); set({ defNotes: [...s] }); };
   const [banner, setBanner] = useState('idle');
   const resetBanner = () => { try { localStorage.removeItem('at_ios_hint'); } catch(e){} setBanner('done'); setTimeout(()=>setBanner('idle'), 1800); };
@@ -592,6 +750,51 @@ function SettingsTab({ settings, onChange }) {
 
       <div style={card}>
         <div style={h}>Notifications</div>
+      <div style={card}>
+        <div style={h}>Practice drills</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:7 }}>
+          {DRILLS.map(d => {
+            const on = drills.includes(d);
+            return (
+              <button key={d} onClick={()=>toggleDrill(d)}
+                style={{ textAlign:'left', padding:'10px 11px', borderRadius:9, cursor:'pointer', minHeight:44, touchAction:'manipulation',
+                  border:`1px solid ${on?'#e17055':'#2a2840'}`, background:on?'#e1705518':'transparent', color:on?'#fff':'#999' }}>
+                <div style={{ fontSize:12.5, fontWeight:800 }}>{on?'●':'○'} {DRILL_META[d].label}</div>
+                <div style={{ fontSize:11, color:'#888', marginTop:3 }}>{DRILL_META[d].ask}</div>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize:10.5, color:'#666', marginTop:9, lineHeight:1.6 }}>
+          "Lands on" always uses the major I. Over a minor I the third is the ♭13 — a note
+          that is already in the scale — so the drill would have you tapping a dot that is
+          right there in front of you.
+        </div>
+        <div style={{ ...h, marginTop:14 }}>Questions per session</div>
+        <div style={{ display:'flex', gap:6 }}>
+          {[8,12,20].map(n => <button key={n} onClick={()=>set({ sessionN:n })} style={seg((settings.sessionN||12)===n)}>{n}</button>)}
+        </div>
+        <div style={{ ...h, marginTop:14 }}>Key for each question</div>
+        <div style={{ display:'flex', gap:6 }}>
+          {[['random','All 12'],['common','Common'],['fixed','Current key']].map(([v,l]) =>
+            <button key={v} onClick={()=>set({ keyMode:v })} style={seg((settings.keyMode||'random')===v)}>{l}</button>)}
+        </div>
+        <div style={{ fontSize:10.5, color:'#666', marginTop:8, lineHeight:1.6 }}>
+          A new key every question is the point — a shape you only know in one place is a
+          picture, not a shape. Pin it to the current key for a first pass at something new.
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={h}>Progress</div>
+        <ProgressBackup toolKey="alt" prefix="at_" />
+        <button onClick={()=>{ if (confirmReset) { onResetProgress(); setConfirmReset(false); } else setConfirmReset(true); }}
+          style={{ width:'100%', marginTop:10, background:'transparent', border:`1px solid ${confirmReset?'#ef4444':'#2a2840'}`,
+            color:confirmReset?'#ff8f8f':'#888', borderRadius:9, padding:'10px', fontSize:12, fontWeight:700, cursor:'pointer', minHeight:42 }}>
+          {confirmReset ? 'Tap again to erase every drill result' : 'Reset practice progress'}
+        </button>
+      </div>
+
         <button onClick={resetBanner} style={{ background:'transparent', border:'1px solid #2a2840', color:banner==='done'?'#2dd4bf':'#ccc', borderRadius:8, padding:'9px 14px', fontSize:12, fontWeight:700, cursor:'pointer', minHeight:40, touchAction:'manipulation' }}>
           {banner==='done' ? '✓ Reset — banner will show again' : 'Reset install banner'}
         </button>
@@ -629,19 +832,247 @@ function BannerStack() {
   );
 }
 
+// ── PRACTICE TAB ─────────────────────────────────────────────────────────
+// The answer to "which shape am I on, and when do I move on".
+//
+// Recommended but open: the app names ONE focus shape and defaults to it, but
+// the ladder underneath stays tappable and nothing is locked. at_focus (the
+// recommendation) is deliberately separate from at_shape (where you happen to
+// be browsing) so wandering off in Positions does not silently rewrite the plan.
+function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, onSession }) {
+  const drills = (settings.drills && settings.drills.length) ? settings.drills : ['root','ires'];
+  const sessionN = settings.sessionN || 12;
+  const keyMode = settings.keyMode || 'random';
+  const [queue, setQueue] = useState(null);
+  const [qi, setQi] = useState(0);
+  const [answer, setAnswer] = useState(null);   // { correct, tapped, verdict }
+  const [tally, setTally] = useState({ ok:0, miss:0 });
+
+  const pickKey = () => keyMode === 'fixed' ? root
+    : keyMode === 'common' ? [0,2,4,5,7,9,11][ri(7)]
+    : ri(12);
+
+  const focusNum = focus?.shape || 1;
+  const prog = useMemo(() => shapeProgress(focusNum, srs, drills), [focusNum, srs, drills]);
+  const ladder = useMemo(() => [1,2,3,4,5].map(n => ({ n, ...shapeProgress(n, srs, drills) })), [srs, drills]);
+  const focusShape = useMemo(() => getCagedShape(root, focusNum), [root, focusNum]);
+  const dueTotal = useMemo(() => {
+    const td = todayStr();
+    return buildCards(drills).filter(c => srs[c.id] && dayDiff(td, srs[c.id].nextDue) <= 0).length;
+  }, [srs, drills]);
+
+  // Each rep picks its own key, so the app-wide key selector would be showing
+  // something different from the card. Tell App to hide it while we run.
+  useEffect(() => { onSession?.(!!queue); }, [queue, onSession]);
+  useEffect(() => () => onSession?.(false), [onSession]);
+
+  const start = (nums) => {
+    const cards = buildCards(drills).filter(c => nums.includes(c.shape));
+    setQueue(buildQueue(cards, srs, sessionN, pickKey));
+    setQi(0); setAnswer(null); setTally({ ok:0, miss:0 });
+  };
+  const quit = () => { setQueue(null); setAnswer(null); };
+
+  const card = { background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:12, marginBottom:12 };
+  const h = { fontSize:11, color:'#888', letterSpacing:'.5px', textTransform:'uppercase', fontWeight:800, marginBottom:8 };
+  const primary = { width:'100%', background:'#e17055', color:'#fff', border:'none', borderRadius:10, padding:'14px', fontSize:15, fontWeight:800, cursor:'pointer', minHeight:48, touchAction:'manipulation' };
+  const ghost = { width:'100%', background:'transparent', color:'#aaa', border:'1px solid #2a2840', borderRadius:9, padding:'10px', fontSize:12.5, fontWeight:700, cursor:'pointer', minHeight:42, touchAction:'manipulation', marginTop:8 };
+
+  // ── A running session ──────────────────────────────────────────────────
+  if (queue) {
+    if (qi >= queue.length) {
+      const pct = Math.round((tally.ok / Math.max(1, tally.ok + tally.miss)) * 100);
+      return (
+        <div>
+          <div style={{ ...card, textAlign:'center', padding:'24px 14px' }}>
+            <div style={{ fontSize:34, marginBottom:6 }}>{pct >= 80 ? '⭐' : pct >= 60 ? '🎸' : '💪'}</div>
+            <div style={{ fontSize:22, fontWeight:900, color:'#fff' }}>{tally.ok} / {tally.ok + tally.miss}</div>
+            <div style={{ fontSize:12, color:'#999', marginTop:6 }}>Every rep was in a different key. That is the part that sticks.</div>
+          </div>
+          <button onClick={()=>start(queue.map(q=>q.shape).filter((v,i,a)=>a.indexOf(v)===i))} style={primary}>Go again</button>
+          <button onClick={quit} style={ghost}>Done</button>
+        </div>
+      );
+    }
+    const it = queue[qi];
+    const sh = getCagedShape(it.root, it.shape);
+    const win = winOf(sh);
+    const { ok, near } = answerSet(it.drill, sh, it.root, win);
+    const meta = DRILL_META[it.drill];
+    const targetPc = it.drill === 'root' ? it.root : pc(it.root + (it.drill === 'ires' ? 5 : 9));
+
+    const tap = (st, f) => {
+      if (answer) return;
+      const k = ckey(st, f);
+      const correct = ok.has(k);
+      const isNear = !correct && near.has(k);
+      const deg = altDegOf(OPEN_MIDI[st] + f, it.root);
+      const verdict = correct ? 'Yes.'
+        : isNear ? `That is ${NOTE_NAMES[pc(OPEN_MIDI[st]+f)]} — the right note, but not one in this shape.`
+        : deg ? `That is ${NOTE_NAMES[pc(OPEN_MIDI[st]+f)]}, the ${deg} of ${NOTE_NAMES[it.root]}alt.`
+        : `That is ${NOTE_NAMES[pc(OPEN_MIDI[st]+f)]}, which is not in the scale.`;
+      setAnswer({ correct, tapped:k, verdict });
+      setTally(t => ({ ok: t.ok + (correct?1:0), miss: t.miss + (correct?0:1) }));
+      onGrade(it.id, correct, it.root);
+      playMidis([OPEN_MIDI[st] + f]);
+      if (correct) setTimeout(() => { setAnswer(null); setQi(i=>i+1); }, 850);
+    };
+
+    const marks = [];
+    if (answer) {
+      const [ts, tf] = answer.tapped.split('_').map(Number);
+      marks.push({ s:ts, f:tf, kind: answer.correct ? 'ok' : 'bad' });
+      if (!answer.correct) for (const k of ok) { const [a,b] = k.split('_').map(Number); marks.push({ s:a, f:b, kind:'reveal' }); }
+    }
+    // For "lands on", light up the b7s so the half-step slide is visible.
+    const hl = it.drill === 'ithird' && !answer
+      ? new Set(sh.cells.filter(c=>c.deg==='b7').map(c=>ckey(c.s,c.f))) : null;
+
+    return (
+      <div>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+          <button onClick={quit} aria-label="End session" style={{ background:'transparent', border:'1px solid #2a2840', color:'#aaa', borderRadius:8, padding:'6px 11px', fontSize:12, fontWeight:700, cursor:'pointer', minHeight:40, touchAction:'manipulation' }}>End</button>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:12, color:'#888' }}>Position {it.shape} · {qi+1} / {queue.length}</div>
+            <div style={{ height:4, background:'#1a1928', borderRadius:2, marginTop:4, overflow:'hidden' }}>
+              <div style={{ width:`${(qi/queue.length)*100}%`, height:'100%', background:'#e17055' }} />
+            </div>
+          </div>
+        </div>
+
+        <div style={{ ...card, textAlign:'center' }}>
+          <div style={{ fontSize:18, fontWeight:900, color:'#e17055' }}>{NOTE_NAMES[it.root]}7alt</div>
+          <div style={{ fontSize:13.5, color:'#ddd', marginTop:6, lineHeight:1.5 }}>{meta.ask}</div>
+          {it.drill !== 'root' && (
+            <div style={{ fontSize:11, color:'#777', marginTop:5 }}>
+              resolving to {NOTE_NAMES[pc(it.root+5)]} · not a note in the shape
+            </div>
+          )}
+        </div>
+
+        <div style={{ background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:'10px 6px' }}>
+          <Fretboard cells={sh.cells} root={it.root} labelMode={labelMode} mono
+            win={win} rowH={36} fill highlight={hl} marks={marks}
+            onTapCell={answer ? undefined : tap} />
+        </div>
+
+        {answer && (
+          <div style={{ ...card, marginTop:12, borderColor: answer.correct ? '#2ed57355' : '#ef444455' }}>
+            <div style={{ fontSize:13, color: answer.correct ? '#2ed573' : '#ffb4b4', fontWeight:700, lineHeight:1.5 }}>{answer.verdict}</div>
+            {!answer.correct && (
+              <>
+                <div style={{ fontSize:11.5, color:'#999', marginTop:6, lineHeight:1.6 }}>
+                  {it.drill === 'root' ? 'The roots in this shape are ringed.'
+                    : `Every ${NOTE_NAMES[targetPc]} in view is ringed.`}
+                </div>
+                <button onClick={()=>{ setAnswer(null); setQi(i=>i+1); }} style={{ ...primary, marginTop:10 }}>Next ›</button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Idle ───────────────────────────────────────────────────────────────
+  const pips = n => drills.map(d => {
+    const c = srs[cardId(n,d)];
+    return { d, on: isLearned(c), part: !!c && !isLearned(c) };
+  });
+
+  return (
+    <div>
+      <div style={{ ...card, borderColor:'#e1705544' }}>
+        <div style={h}>Your focus</div>
+        <div style={{ display:'flex', alignItems:'baseline', gap:8, flexWrap:'wrap' }}>
+          <div style={{ fontSize:22, fontWeight:900, color:'#fff' }}>Position {focusNum}</div>
+          <div style={{ fontSize:11.5, color:'#888' }}>starts on {focusShape?.start} · frets {focusShape?.lo}–{focusShape?.hi} in {NOTE_NAMES[root]}</div>
+        </div>
+        <div style={{ marginTop:10, marginBottom:10 }}>
+          <Fretboard cells={focusShape?.cells || []} root={root} labelMode={labelMode} />
+        </div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:10 }}>
+          {pips(focusNum).map(({d,on,part}) => (
+            <span key={d} style={{ fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:14,
+              border:`1px solid ${on?'#2ed573':part?'#74b9ff':'#2a2840'}`,
+              color:on?'#2ed573':part?'#74b9ff':'#777' }}>
+              {on?'●':part?'◐':'○'} {DRILL_META[d].short}
+            </span>
+          ))}
+          <span style={{ fontSize:11, color:'#777', padding:'4px 0' }}>{prog.keyCount}/12 keys</span>
+        </div>
+        <button onClick={()=>start([focusNum])} style={primary}>▶ Practise Position {focusNum}</button>
+        <button onClick={()=>start([1,2,3,4,5])} style={ghost}>Practise all five{dueTotal ? ` · ${dueTotal} due` : ''}</button>
+      </div>
+
+      {prog.ready && focusNum < 5 && (
+        <div style={{ ...card, borderColor:'#2ed57355' }}>
+          <div style={{ fontSize:13.5, color:'#2ed573', fontWeight:800, marginBottom:4 }}>Position {focusNum} is solid.</div>
+          <div style={{ fontSize:12, color:'#bbb', lineHeight:1.6, marginBottom:10 }}>
+            Every drill at {READY_REPS}+ reps, across {prog.keyCount} keys. Ready for Position {focusNum+1}?
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>onFocus(focusNum+1)} style={{ ...primary, background:'#2ed573', color:'#06281f', flex:1 }}>Move on</button>
+            <button onClick={()=>onFocus(focusNum)} style={{ ...ghost, marginTop:0, width:'auto', padding:'10px 16px' }}>Not yet</button>
+          </div>
+        </div>
+      )}
+
+      <div style={card}>
+        <div style={h}>The five shapes</div>
+        {ladder.map(l => {
+          const isFocus = l.n === focusNum;
+          return (
+            <div key={l.n} style={{ display:'flex', alignItems:'center', gap:9, padding:'9px 8px', borderRadius:9, marginBottom:5,
+              border:`1px solid ${isFocus?'#e17055':'#1f1e2e'}`, background:isFocus?'#e1705511':'transparent' }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12.5, fontWeight:800, color:'#fff' }}>
+                  Position {l.n} <span style={{ color:'#777', fontWeight:600, fontSize:11 }}>starts on {SHAPE_ANCHOR[SHAPE_ORDER[l.n-1]]}</span>
+                </div>
+                <div style={{ display:'flex', height:5, borderRadius:3, overflow:'hidden', background:'#1a1928', marginTop:5 }}>
+                  <div style={{ flex:l.mastered, background:'#2ed573' }} />
+                  <div style={{ flex:l.total-l.mastered-l.nw, background:'#74b9ff' }} />
+                  <div style={{ flex:l.nw, background:'transparent' }} />
+                </div>
+                <div style={{ fontSize:10, color:'#777', marginTop:4 }}>
+                  {l.ready ? `solid · ${l.keyCount} keys` : l.nw === l.total ? 'not started' : `${l.mastered}/${l.total} drills${l.due?` · ${l.due} due`:''}`}
+                </div>
+              </div>
+              <button onClick={()=>onFocus(l.n)} disabled={isFocus}
+                style={{ background:'transparent', border:`1px solid ${isFocus?'#e17055':'#2a2840'}`, color:isFocus?'#e17055':'#888',
+                  borderRadius:8, padding:'8px 10px', fontSize:11, fontWeight:700, cursor:isFocus?'default':'pointer', minHeight:44, minWidth:44, touchAction:'manipulation' }}>
+                {isFocus ? 'focus' : 'set'}
+              </button>
+            </div>
+          );
+        })}
+        <div style={{ fontSize:10.5, color:'#666', lineHeight:1.6, marginTop:8 }}>
+          Nothing is locked — the focus is a suggestion. "Solid" is not "finished" either:
+          cards keep coming back on a schedule, which is what makes them stay.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════
 //  APP
 // ════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [root, setRoot] = useState(7);          // G7alt default
   const [labelMode, setLabelMode] = useState('degrees');
-  const [tab, setTab] = useState('positions');
+  // Practice is the landing screen: the problem it solves is "which shape am I
+  // supposed to be working on", and that has to be the first thing you see.
+  const [tab, setTab] = useState('practice');
   const [keyMode, setKeyMode] = useState('dom'); // 'dom' (V7alt root) | 'tonic' (resolution key)
   const [settings, setSettings] = useState({ defSystem:'caged', defKind:'maj', defNotes:['R','3'], defKeyMode:'dom' });
   // Which CAGED shape you are on, as a stable position number (1-5). Lives here
   // rather than in PositionsTab because Practice has to agree with it, and
   // because migrating the old at_pos needs the restored key.
   const [shapeNum, setShapeNum] = useState(1);
+  const [srs, setSrs] = useState({});
+  const [focus, setFocus] = useState({ shape: 1, since: null });
+  const [drilling, setDrilling] = useState(false);
   const prefsLoaded = useRef(false);
   const scrollRef = useRef(null);
 
@@ -671,6 +1102,8 @@ export default function App() {
       }
       if (num >= 1 && num <= 5) setShapeNum(num);
     } catch(e){}
+    try { setSrs(jstore.get('at_srs', {}) || {}); } catch(e){}
+    try { const f = jstore.get('at_focus', null); if (f && f.shape >= 1 && f.shape <= 5) setFocus(f); } catch(e){}
     prefsLoaded.current = true;
   })(); }, []);
   useEffect(() => { store.set('at_root', String(root)); }, [root]);
@@ -680,6 +1113,31 @@ export default function App() {
   // would write the default 1 over a stored value before the async read above
   // has got to it.
   useEffect(() => { if (prefsLoaded.current) jstore.set('at_shape', shapeNum); }, [shapeNum]);
+
+  // Grading writes synchronously — it happens inside a tap handler and the
+  // queue advances immediately, so an async write would race the next tap.
+  // keysSeen is a 12-bit mask: with a random key per rep, the rep count alone
+  // cannot tell you whether a shape is known or just memorised in one place.
+  const grade = useCallback((id, correct, atRoot) => {
+    setSrs(prev => {
+      const next = { ...prev, [id]: {
+        ...updateSRS(prev[id], correct),
+        keysSeen: (prev[id]?.keysSeen || 0) | (correct ? (1 << atRoot) : 0),
+        seen: (prev[id]?.seen || 0) + 1,
+      } };
+      jstore.set('at_srs', next);
+      return next;
+    });
+  }, []);
+  const resetProgress = useCallback(() => {
+    setSrs({}); jstore.set('at_srs', {});
+    const f = { shape: 1, since: null };
+    setFocus(f); jstore.set('at_focus', f);
+  }, []);
+  const moveFocus = useCallback(n => {
+    const f = { shape: Math.min(5, Math.max(1, n)), since: todayStr() };
+    setFocus(f); jstore.set('at_focus', f); setShapeNum(f.shape);
+  }, []);
   useEffect(() => { setKeyMode(settings.defKeyMode === 'tonic' ? 'tonic' : 'dom'); }, [settings.defKeyMode]);
 
   // PWA: manifest, icon, theme, iOS scroll fix
@@ -718,7 +1176,7 @@ export default function App() {
     return () => { document.head.removeChild(style); window.removeEventListener('scroll', lock); };
   }, []);
 
-  const TABS = [{id:'explorer',label:'Explorer',icon:'🧭'},{id:'positions',label:'Positions',icon:'🎸'},{id:'settings',label:'Settings',icon:'⚙️'}];
+  const TABS = [{id:'practice',label:'Practice',icon:'🎯'},{id:'explorer',label:'Explorer',icon:'🧭'},{id:'positions',label:'Positions',icon:'🎸'},{id:'settings',label:'Settings',icon:'⚙️'}];
   const CW = 600; // centered content max-width (matches ChordTrainer)
 
   return (
@@ -731,8 +1189,10 @@ export default function App() {
 
       <TabBar toolKey="alt" tabs={TABS} active={tab} onChange={(id)=>{setTab(id); if(scrollRef.current)scrollRef.current.scrollTop=0;}} />
 
-      {/* key selector: V7alt root <-> resolution key — below the tabs, full-bleed border, centered inner */}
-      <div style={{ borderBottom:'1px solid #1a1928' }}>
+      {/* key selector: V7alt root <-> resolution key — below the tabs, full-bleed border, centered inner.
+          Hidden during a drill: every question picks its own key, so leaving this
+          up would show a key that contradicts the card in front of you. */}
+      {!drilling && <div style={{ borderBottom:'1px solid #1a1928' }}>
        <div style={{ padding:'8px 10px', maxWidth:CW, margin:'0 auto' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:7 }}>
           <div style={{ display:'flex', gap:5 }}>
@@ -756,14 +1216,15 @@ export default function App() {
           })}
         </div>
        </div>
-      </div>
+      </div>}
 
       {/* content — centered inner */}
       <div ref={scrollRef} style={{ flex:1, overflowY:'auto', WebkitOverflowScrolling:'touch', overscrollBehaviorY:'none' }}>
         <div style={{ maxWidth:CW, margin:'0 auto', paddingBottom:'max(80px,env(safe-area-inset-bottom))' }}>
           {tab==='explorer' && <ExplorerTab root={root} labelMode={labelMode} />}
-          {tab==='positions' && <PositionsTab root={root} labelMode={labelMode} settings={settings} shapeNum={shapeNum} onShapeNum={setShapeNum} />}
-          {tab==='settings' && <SettingsTab settings={settings} onChange={setSettings} />}
+          {tab==='practice' && <PracticeTab root={root} labelMode={labelMode} settings={settings} srs={srs} onGrade={grade} focus={focus} onFocus={moveFocus} onSession={setDrilling} />}
+          {tab==='positions' && <PositionsTab root={root} labelMode={labelMode} settings={settings} shapeNum={shapeNum} onShapeNum={setShapeNum} focusNum={focus.shape} onFocus={moveFocus} onPractise={()=>setTab('practice')} />}
+          {tab==='settings' && <SettingsTab settings={settings} onChange={setSettings} onResetProgress={resetProgress} />}
         </div>
       </div>
 
