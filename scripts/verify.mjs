@@ -183,18 +183,43 @@ check('the neck order is still a clean low-to-high walk', () => {
 
 console.log('\nThe practice drills');
 
-// Answer sets, re-derived. Any cell of the right pitch class inside the drawn
-// window counts — "identify the root" means point at one, and there are always
-// several.
-function answers(drill, sh, root, win) {
+// Answer sets, re-derived. EVERY correct cell is in the set — the drill is
+// answered by selecting all of them, not one. Tapping the single root you
+// happen to know used to pass, which is the hole this closes.
+const key = (s, f) => `${s}_${f}`;
+
+// The window a production drill draws: 8 frets, with the shape pushed `k` frets
+// in from the left so the framing does not give its position away.
+const WIN_W = 8;
+const winFor = (sh, k = 0) => { const lo = Math.max(0, sh.lo - Math.min(k, sh.lo)); return { lo, hi: lo + WIN_W - 1 }; };
+
+// One octave of a shape: the cells from its lowest root up to the next root.
+function rootSpan(sh) {
+  const roots = [...new Set(sh.cells.filter(c => c.deg === 'R').map(c => OPEN_MIDI[c.s] + c.f))].sort((a, b) => a - b);
+  if (roots.length < 2) return [];
+  return sh.cells.filter(c => { const m = OPEN_MIDI[c.s] + c.f; return m >= roots[0] && m <= roots[1]; });
+}
+
+// Which dots `fill` removes. Deterministic in the seed so a question cannot
+// reshuffle underneath the answer.
+function blanksFor(sh, n, seed) {
+  const idx = sh.cells.map((_, i) => i);
+  let x = seed >>> 0;
+  for (let i = idx.length - 1; i > 0; i--) { x = (x * 1664525 + 1013904223) >>> 0; const j = x % (i + 1); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+  return idx.slice(0, Math.min(n, sh.cells.length)).map(i => sh.cells[i]);
+}
+
+function answers(drill, sh, root, win, blanks) {
   const ok = new Set(), near = new Set();
-  const key = (s, f) => `${s}_${f}`;
   if (drill === 'root') {
     sh.cells.filter(c => c.deg === 'R').forEach(c => ok.add(key(c.s, c.f)));
     for (let s = 0; s < 6; s++) for (let f = win.lo; f <= win.hi; f++)
       if (pc(OPEN_MIDI[s] + f) === root && !ok.has(key(s, f))) near.add(key(s, f));
     return { ok, near };
   }
+  if (drill === 'build')  { sh.cells.forEach(c => ok.add(key(c.s, c.f))); return { ok, near }; }
+  if (drill === 'octave') { rootSpan(sh).forEach(c => ok.add(key(c.s, c.f))); return { ok, near }; }
+  if (drill === 'fill')   { (blanks || []).forEach(c => ok.add(key(c.s, c.f))); return { ok, near }; }
   const tp = pc(root + (drill === 'ires' ? 5 : 9));   // I root, or the MAJOR I's 3rd
   for (let s = 0; s < 6; s++) for (let f = win.lo; f <= win.hi; f++)
     if (pc(OPEN_MIDI[s] + f) === tp) ok.add(key(s, f));
@@ -271,6 +296,124 @@ check('the b7 half-step slide is always visible in the window', () => {
       if (!sh.cells.some(c => c.deg === 'b7' && c.f - 1 >= win.lo)) fail(`root ${root} Position ${num}: no b7 with its resolution on screen`);
     }
   }
+});
+
+check('a recognition drill returns EVERY answer, not one', () => {
+  // The hole this closes: tapping the one root you know used to pass the card.
+  for (let root = 0; root < 12; root++) {
+    for (let num = 1; num <= 5; num++) {
+      const sh = shape(SHAPE_ORDER[num - 1], root), win = windowOf(sh);
+      const roots = sh.cells.filter(c => c.deg === 'R');
+      const { ok } = answers('root', sh, root, win);
+      assertions++;
+      if (ok.size !== roots.length) fail(`root ${root} Position ${num}: ${ok.size} answers for ${roots.length} roots`);
+      for (const c of roots) if (!ok.has(key(c.s, c.f))) fail(`root ${root} Position ${num}: missed the root at ${c.s}_${c.f}`);
+      // and every occurrence of the target pitch class, for the resolution drills
+      for (const drill of ['ires', 'ithird']) {
+        const tp = pc(root + (drill === 'ires' ? 5 : 9));
+        let n = 0;
+        for (let s = 0; s < 6; s++) for (let f = win.lo; f <= win.hi; f++) if (pc(OPEN_MIDI[s] + f) === tp) n++;
+        assertions++;
+        if (answers(drill, sh, root, win).ok.size !== n) fail(`root ${root} Position ${num} ${drill}: not every occurrence returned`);
+      }
+    }
+  }
+});
+
+console.log('\nProduction drills — blank neck');
+
+check('the offset window always holds the whole shape and stays on the neck', () => {
+  for (let root = 0; root < 12; root++) {
+    for (let num = 1; num <= 5; num++) {
+      const sh = shape(SHAPE_ORDER[num - 1], root);
+      eq(sh.hi - sh.lo + 1, 5, `Position ${num} in key ${root} span`);   // all five shapes span 5 frets
+      for (let k = 0; k <= 3; k++) {
+        const w = winFor(sh, k);
+        assertions++;
+        if (w.lo < 0) fail(`root ${root} Position ${num} k=${k}: window starts at ${w.lo}`);
+        if (sh.lo < w.lo || sh.hi > w.hi) fail(`root ${root} Position ${num} k=${k}: shape ${sh.lo}-${sh.hi} does not fit window ${w.lo}-${w.hi}`);
+      }
+    }
+  }
+});
+
+check('the window actually hides the position most of the time', () => {
+  // At lo < 3 the shape cannot be pushed the full 3 frets in, so it sits at or
+  // near the left edge. That is a known limit, not a surprise — pin the count
+  // so it cannot quietly get worse.
+  let tight = 0, total = 0;
+  for (let root = 0; root < 12; root++) for (let num = 1; num <= 5; num++) {
+    total++; if (shape(SHAPE_ORDER[num - 1], root).lo < 3) tight++;
+  }
+  eq(total, 60, 'combinations checked');
+  assertions++;
+  if (tight > 15) fail(`${tight} of 60 combinations cannot offset fully — was 15`);
+});
+
+check('build asks for the whole shape and nothing else', () => {
+  for (let root = 0; root < 12; root++) {
+    for (let num = 1; num <= 5; num++) {
+      const sh = shape(SHAPE_ORDER[num - 1], root), win = winFor(sh, 2);
+      const { ok } = answers('build', sh, root, win);
+      eq(ok.size, sh.cells.length, `Position ${num} key ${root} build size`);
+      for (const c of sh.cells) {
+        assertions++;
+        if (!ok.has(key(c.s, c.f))) fail(`root ${root} Position ${num}: build missed ${c.s}_${c.f}`);
+        if (c.f < win.lo || c.f > win.hi) fail(`root ${root} Position ${num}: cell ${c.f} outside the window`);
+      }
+    }
+  }
+});
+
+check('octave is one root-to-root span, and every shape has one', () => {
+  for (let root = 0; root < 12; root++) {
+    for (let num = 1; num <= 5; num++) {
+      const sh = shape(SHAPE_ORDER[num - 1], root);
+      const span = rootSpan(sh);
+      assertions++;
+      if (!span.length) fail(`root ${root} Position ${num}: no root-to-root span`);
+      eq(span.length, 8, `Position ${num} key ${root} octave size`);
+      const midis = span.map(c => OPEN_MIDI[c.s] + c.f).sort((a, b) => a - b);
+      eq(midis[midis.length - 1] - midis[0], 12, `Position ${num} key ${root} span is an octave`);
+      const ends = span.filter(c => c.deg === 'R').length;
+      assertions++;
+      if (ends < 2) fail(`root ${root} Position ${num}: span should be bounded by two roots, found ${ends}`);
+    }
+  }
+});
+
+check('fill removes exactly the dots it asks for, and they are stable', () => {
+  const N = 5;
+  for (let root = 0; root < 12; root++) {
+    for (let num = 1; num <= 5; num++) {
+      const sh = shape(SHAPE_ORDER[num - 1], root);
+      const seed = root * 5 + num;
+      const blanks = blanksFor(sh, N, seed);
+      eq(blanks.length, N, `Position ${num} key ${root} blank count`);
+      // same seed, same blanks — a question must not reshuffle mid-answer
+      eq(JSON.stringify(blanksFor(sh, N, seed)), JSON.stringify(blanks), `Position ${num} key ${root} blanks stable`);
+      const { ok } = answers('fill', sh, root, winFor(sh, 1), blanks);
+      eq(ok.size, N, `Position ${num} key ${root} fill answers`);
+      const uniq = new Set(blanks.map(c => key(c.s, c.f)));
+      eq(uniq.size, N, `Position ${num} key ${root} blanks distinct`);
+      for (const c of blanks) {
+        assertions++;
+        if (!sh.cells.some(x => x.s === c.s && x.f === c.f)) fail(`root ${root} Position ${num}: blank ${c.s}_${c.f} is not in the shape`);
+      }
+    }
+  }
+});
+
+check('key coverage is only demanded where the key changes the answer', () => {
+  // Point 1: with the shape drawn, the picture is identical in all 12 keys, so
+  // requiring key coverage of a drill that draws it asks for something that is
+  // not a skill. `fill` belongs on the recognition side of this line even
+  // though it is a "produce the dots" question — it draws the shape minus a
+  // few, so the picture is still key-invariant.
+  const KEY_DRILLS = new Set(literal('KEY_DRILLS') || []);
+  const inApp = new Set(JSON.parse(JSON.stringify([...KEY_DRILLS])));
+  for (const d of ['root', 'ires', 'ithird', 'fill']) { assertions++; if (inApp.has(d)) fail(`${d} draws the shape, so it must not count toward key coverage`); }
+  for (const d of ['build', 'octave']) { assertions++; if (!inApp.has(d)) fail(`${d} starts from a blank neck, so it must count toward key coverage`); }
 });
 
 console.log('\nSpaced repetition');

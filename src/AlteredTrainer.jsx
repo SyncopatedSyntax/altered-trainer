@@ -170,12 +170,61 @@ const popcount = n => { let c=0; while(n){ n &= n-1; c++; } return c; };
 // `ithird` is MAJOR-ONLY and must not follow settings.defKind. Over a minor I
 // the third is root+8, which IS in the scale (it is the b13); it would sit
 // under an existing dot and destroy the premise. verify.mjs pins this.
-const DRILLS = ['root','ires','ithird'];
+//
+// Two families. RECOGNITION draws the shape for you; the key is decoration,
+// because a position's picture is identical in all twelve keys (verify.mjs
+// asserts exactly that as the numbering invariant). PRODUCTION gives you an
+// empty neck, so you have to find the root yourself — that is the only place
+// the key is doing any work.
+//
+// Every drill is answered by selecting the COMPLETE set. Accepting any one
+// correct cell meant the single root you already knew passed the card forever.
+const DRILLS = ['root','ires','ithird','fill','octave','build'];
+// Two different distinctions, and conflating them was a mistake worth naming.
+// BLANK is about what gets DRAWN: only these start from an empty neck, so only
+// these need the window that hides where the shape sits.
+// KEY_DRILLS is about what the KEY changes: `fill` draws the shape minus a few
+// dots, so its picture — like every recognition drill — is identical in all
+// twelve keys, and demanding key coverage of it would repeat the exact mistake
+// this change exists to fix.
+const BLANK = new Set(['build','octave']);
+const KEY_DRILLS = new Set(['build','octave']);
 const DRILL_META = {
-  root:   { label:'The root',    short:'Root',     ask:'Tap the root of the altered scale.' },
-  ires:   { label:'Resolves to', short:'Resolves', ask:'Tap the root of the key it resolves to.' },
-  ithird: { label:'Lands on',    short:'Lands on', ask:'The b7 falls a half step. Tap where it lands.' },
+  root:   { label:'Every root',   short:'Roots',    ask:'Tap every root of the altered scale in this shape.' },
+  ires:   { label:'Resolves to',  short:'Resolves', ask:'Tap every place the root it resolves to falls.' },
+  ithird: { label:'Lands on',     short:'Lands on', ask:'The b7 falls a half step. Tap every place it lands.' },
+  fill:   { label:'Fill the gaps',short:'Gaps',     ask:'Dots are missing. Put them back.' },
+  octave: { label:'Root to root', short:'Octave',   ask:'One octave: from the lowest root up to the next.' },
+  build:  { label:'Build it',     short:'Build',    ask:'Empty neck. Place the whole shape.' },
 };
+const DEFAULT_DRILLS = ['root','ires','fill','octave','build'];
+
+// The window a production drill draws: 8 frets wide, with the shape pushed k
+// frets in from the left so the framing does not hand you its position. Every
+// shape spans exactly 5 frets, so k can be 0-3 (less when the shape sits near
+// the nut, which verify.mjs pins at 15 of 60 combinations).
+const WIN_W = 8;
+const winFor = (sh, k=0) => { const lo = Math.max(0, sh.lo - Math.min(k, sh.lo)); return { lo, hi: lo + WIN_W - 1 }; };
+const offsetFor = sh => ri(Math.min(3, sh.lo) + 1);
+
+// One octave of a shape: its lowest root up to the next one. Same idea as
+// MelodicMinorTrainer's getRootSpans() — a box played end to end starts and
+// ends on arbitrary degrees, so a root-to-root slice is the honest unit.
+function rootSpan(sh) {
+  const roots = [...new Set(sh.cells.filter(c => c.deg==='R').map(c => OPEN_MIDI[c.s] + c.f))].sort((a,b)=>a-b);
+  if (roots.length < 2) return [];
+  return sh.cells.filter(c => { const m = OPEN_MIDI[c.s] + c.f; return m >= roots[0] && m <= roots[1]; });
+}
+
+// Which dots `fill` takes away. Seeded, so the question cannot reshuffle while
+// you are answering it.
+const FILL_BLANKS = 5;
+function blanksFor(sh, n, seed) {
+  const idx = sh.cells.map((_,i)=>i);
+  let x = seed >>> 0;
+  for (let i = idx.length-1; i > 0; i--) { x = (x*1664525 + 1013904223) >>> 0; const j = x % (i+1); [idx[i],idx[j]] = [idx[j],idx[i]]; }
+  return idx.slice(0, Math.min(n, sh.cells.length)).map(i => sh.cells[i]);
+}
 const cardId = (num, drill) => `${num}|${drill}`;
 const buildCards = drills => { const out=[]; for (let num=1;num<=5;num++) for (const d of drills) out.push({ id:cardId(num,d), shape:num, drill:d }); return out; };
 
@@ -183,7 +232,7 @@ const ckey = (st,f) => st+'_'+f;
 // Every acceptable answer, plus (for the root drill) the near misses that are
 // the right note in the wrong place. Any matching cell counts - "identify the
 // root" means point at one, and there are always several.
-function answerSet(drill, shape, root, win) {
+function answerSet(drill, shape, root, win, blanks) {
   const ok = new Set(), near = new Set();
   if (drill === 'root') {
     shape.cells.filter(c => c.deg==='R').forEach(c => ok.add(ckey(c.s,c.f)));
@@ -191,6 +240,9 @@ function answerSet(drill, shape, root, win) {
       if (pc(OPEN_MIDI[st]+f)===root && !ok.has(ckey(st,f))) near.add(ckey(st,f));
     return { ok, near };
   }
+  if (drill === 'build')  { shape.cells.forEach(c => ok.add(ckey(c.s,c.f))); return { ok, near }; }
+  if (drill === 'octave') { rootSpan(shape).forEach(c => ok.add(ckey(c.s,c.f))); return { ok, near }; }
+  if (drill === 'fill')   { (blanks||[]).forEach(c => ok.add(ckey(c.s,c.f))); return { ok, near }; }
   const tp = pc(root + (drill==='ires' ? 5 : 9));
   for (let st=0;st<6;st++) for (let f=win.lo;f<=win.hi;f++) if (pc(OPEN_MIDI[st]+f)===tp) ok.add(ckey(st,f));
   return { ok, near };
@@ -209,7 +261,11 @@ function shapeProgress(num, srs, drills) {
   const mastered = st.filter(isLearned).length;
   const nw = st.filter(c => !c).length;
   const due = st.filter(c => c && dayDiff(td, c.nextDue) <= 0).length;
-  const keys = st.reduce((m,c) => m & (c?.keysSeen ?? 0), 0xFFF);
+  // Key coverage counts ONLY the production drills. With the shape drawn the
+  // picture is the same in every key, so demanding twelve keys of a recognition
+  // drill asks for something that is not a skill.
+  const keyed = drills.filter(d => KEY_DRILLS.has(d)).map(d => srs[cardId(num,d)]);
+  const keys = keyed.length ? keyed.reduce((m,c) => m & (c?.keysSeen ?? 0), 0xFFF) : 0;
   const keyCount = popcount(keys);
   const ready = st.every(c => (c?.reps ?? 0) >= READY_REPS) && keyCount >= READY_KEYS;
   return { mastered, total: drills.length, nw, due, keyCount, ready };
@@ -228,7 +284,9 @@ function buildQueue(cards, srs, count, pickKey) {
   if (!pool.length) return [];
   const q = [];
   while (q.length < count) q.push(pool[q.length % pool.length]);
-  return q.map(c => ({ ...c, root: pickKey() }));
+  // The key, the window offset and the fill blanks are all decided here, once,
+  // so nothing can reshuffle under the answer.
+  return q.map((c,i) => ({ ...c, root: pickKey(), off: ri(4), seed: (Date.now() + i*7919) | 0 }));
 }
 
 // ── Audio (Web Audio pluck) ──────────────────────────────────────────────
@@ -356,12 +414,16 @@ function targetStyle(deg, thirdDeg) {
 //   win          {lo,hi} overriding the window derived from the cells. Load
 //                bearing: the answer set and the drawn board MUST share one
 //                window or an accepted answer can land off-screen.
+//   selected     Set of "s_f" the user has tapped but not yet submitted.
 //   rowH / fill  taller rows and a width-driven layout, for 44px tap targets.
 function Fretboard({ cells, root, labelMode, resolve, sc=1,
-                     mono, hideLabels, highlight, onTapCell, marks, win, rowH=27, fill }) {
-  if (!cells.length) return null;
+                     mono, hideLabels, highlight, onTapCell, marks, selected, win, rowH=27, fill }) {
+  // A production drill draws an EMPTY neck, so no cells is a legitimate state
+  // as long as an explicit window says what to draw.
+  if (!cells.length && !win) return null;
   const fs = cells.map(c => c.f);
   let lo = win ? win.lo : Math.max(0, Math.min(...fs) - 1), hi = win ? win.hi : Math.max(...fs) + 1;
+  const sel = selected || null;
   const FW=36, RH=rowH, padL=22, padT=14, padB=20, padR=10, nf=hi-lo+1;
   const hl = highlight || null;
   const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -412,6 +474,13 @@ function Fretboard({ cells, root, labelMode, resolve, sc=1,
           </circle>
           {!mono && !hideLabels && <text x={cx} y={cy+0.5} fontSize={L.length>2?7:9} fill={txtOn(col)} textAnchor="middle" dominantBaseline="central" fontWeight="bold">{L}</text>}
         </g>);})}
+
+      {/* What the user has picked so far, before submitting. Deliberately not
+          the same visual as a scale dot: on a blank neck there is nothing else
+          to compare it against, so it reads as "I put this here". */}
+      {sel && [...sel].map(k => { const [ss,ff] = k.split('_').map(Number);
+        return <circle key={'sel'+k} pointerEvents="none" cx={fx(ff)} cy={ry(5-ss)} r={11}
+          fill="#e1705533" stroke="#e17055" strokeWidth={2.4} />; })}
 
       {/* Answer feedback, painted over the dots but under the tap grid. */}
       {(marks||[]).map((m,i)=>{const cx=fx(m.f), cy=ry(5-m.s), col=MARK_COLOR[m.kind]||'#fff';
@@ -683,7 +752,7 @@ function PositionsTab({ root, labelMode, settings, shapeNum, onShapeNum, focusNu
 function SettingsTab({ settings, onChange, onResetProgress }) {
   const set = patch => onChange({ ...settings, ...patch });
   const [confirmReset, setConfirmReset] = useState(false);
-  const drills = (settings.drills && settings.drills.length) ? settings.drills : ['root','ires'];
+  const drills = (settings.drills && settings.drills.length) ? settings.drills : DEFAULT_DRILLS;
   const toggleDrill = d => {
     const s = new Set(drills);
     s.has(d) ? s.delete(d) : s.add(d);
@@ -840,12 +909,13 @@ function BannerStack() {
 // recommendation) is deliberately separate from at_shape (where you happen to
 // be browsing) so wandering off in Positions does not silently rewrite the plan.
 function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, onSession }) {
-  const drills = (settings.drills && settings.drills.length) ? settings.drills : ['root','ires'];
+  const drills = (settings.drills && settings.drills.length) ? settings.drills : DEFAULT_DRILLS;
   const sessionN = settings.sessionN || 12;
   const keyMode = settings.keyMode || 'random';
   const [queue, setQueue] = useState(null);
   const [qi, setQi] = useState(0);
-  const [answer, setAnswer] = useState(null);   // { correct, tapped, verdict }
+  const [answer, setAnswer] = useState(null);   // { correct, missed, wrong, verdict }
+  const [picked, setPicked] = useState(new Set());
   const [tally, setTally] = useState({ ok:0, miss:0 });
 
   const pickKey = () => keyMode === 'fixed' ? root
@@ -869,9 +939,9 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
   const start = (nums) => {
     const cards = buildCards(drills).filter(c => nums.includes(c.shape));
     setQueue(buildQueue(cards, srs, sessionN, pickKey));
-    setQi(0); setAnswer(null); setTally({ ok:0, miss:0 });
+    setQi(0); setAnswer(null); setPicked(new Set()); setTally({ ok:0, miss:0 });
   };
-  const quit = () => { setQueue(null); setAnswer(null); };
+  const quit = () => { setQueue(null); setAnswer(null); setPicked(new Set()); };
 
   const card = { background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:12, marginBottom:12 };
   const h = { fontSize:11, color:'#888', letterSpacing:'.5px', textTransform:'uppercase', fontWeight:800, marginBottom:8 };
@@ -883,7 +953,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
     if (qi >= queue.length) {
       const pct = Math.round((tally.ok / Math.max(1, tally.ok + tally.miss)) * 100);
       return (
-        <div>
+        <div style={{ padding:'14px 12px' }}>
           <div style={{ ...card, textAlign:'center', padding:'24px 14px' }}>
             <div style={{ fontSize:34, marginBottom:6 }}>{pct >= 80 ? '⭐' : pct >= 60 ? '🎸' : '💪'}</div>
             <div style={{ fontSize:22, fontWeight:900, color:'#fff' }}>{tally.ok} / {tally.ok + tally.miss}</div>
@@ -896,43 +966,65 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
     }
     const it = queue[qi];
     const sh = getCagedShape(it.root, it.shape);
-    const win = winOf(sh);
-    const { ok, near } = answerSet(it.drill, sh, it.root, win);
+    const blank = BLANK.has(it.drill);
+    // Only a blank-neck drill needs the offset 8-fret window. Anything that
+    // draws the shape is already showing you where it is, so framing it tightly
+    // just gives bigger tap targets.
+    const win = blank ? winFor(sh, Math.min(it.off, sh.lo)) : winOf(sh);
+    const blanks = it.drill === 'fill' ? blanksFor(sh, FILL_BLANKS, it.seed) : null;
+    const blankSet = blanks ? new Set(blanks.map(c => ckey(c.s, c.f))) : null;
+    // What the board shows: nothing for build/octave, the shape minus its gaps
+    // for fill, the whole shape for the recognition drills.
+    const shown = blank ? []
+      : it.drill === 'fill' ? sh.cells.filter(c => !blankSet.has(ckey(c.s,c.f)))
+      : sh.cells;
+    const { ok, near } = answerSet(it.drill, sh, it.root, win, blanks);
     const meta = DRILL_META[it.drill];
-    const targetPc = it.drill === 'root' ? it.root : pc(it.root + (it.drill === 'ires' ? 5 : 9));
+    const targetPc = it.drill === 'ires' ? pc(it.root+5) : it.drill === 'ithird' ? pc(it.root+9) : it.root;
 
-    const tap = (st, f) => {
+    const toggle = (st, f) => {
       if (answer) return;
       const k = ckey(st, f);
-      const correct = ok.has(k);
-      const isNear = !correct && near.has(k);
-      const deg = altDegOf(OPEN_MIDI[st] + f, it.root);
-      const verdict = correct ? 'Yes.'
-        : isNear ? `That is ${NOTE_NAMES[pc(OPEN_MIDI[st]+f)]} — the right note, but not one in this shape.`
-        : deg ? `That is ${NOTE_NAMES[pc(OPEN_MIDI[st]+f)]}, the ${deg} of ${NOTE_NAMES[it.root]}alt.`
-        : `That is ${NOTE_NAMES[pc(OPEN_MIDI[st]+f)]}, which is not in the scale.`;
-      setAnswer({ correct, tapped:k, verdict });
+      setPicked(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+      playMidis([OPEN_MIDI[st] + f]);
+    };
+
+    const check = () => {
+      if (answer || !picked.size) return;
+      const missed = [...ok].filter(k => !picked.has(k));
+      const wrong  = [...picked].filter(k => !ok.has(k));
+      const correct = !missed.length && !wrong.length;
+      const nearHits = wrong.filter(k => near.has(k)).length;
+      const noun = it.drill === 'root' ? 'root' : it.drill === 'fill' ? 'dot' : 'note';
+      const verdict = correct
+        ? `Yes — all ${ok.size}.`
+        : !wrong.length
+          ? `${picked.size} of ${ok.size}. ${missed.length} ${noun}${missed.length>1?'s':''} missing, ringed.`
+          : !missed.length
+            ? `You found them all, but ${wrong.length} extra${wrong.length>1?'s':''}${nearHits?` — ${nearHits} of those is the right note outside the shape`:''}.`
+            : `${ok.size - missed.length} of ${ok.size} right, ${wrong.length} that should not be there.`;
+      setAnswer({ correct, missed, wrong, verdict });
       setTally(t => ({ ok: t.ok + (correct?1:0), miss: t.miss + (correct?0:1) }));
       onGrade(it.id, correct, it.root);
-      playMidis([OPEN_MIDI[st] + f]);
-      if (correct) setTimeout(() => { setAnswer(null); setQi(i=>i+1); }, 850);
+      if (correct) playMidis([...ok].map(k => { const [a,b] = k.split('_').map(Number); return OPEN_MIDI[a]+b; }).sort((a,b)=>a-b), 0.09);
     };
+
+    const nextQ = () => { setAnswer(null); setPicked(new Set()); setQi(i=>i+1); };
 
     const marks = [];
     if (answer) {
-      const [ts, tf] = answer.tapped.split('_').map(Number);
-      marks.push({ s:ts, f:tf, kind: answer.correct ? 'ok' : 'bad' });
-      if (!answer.correct) for (const k of ok) { const [a,b] = k.split('_').map(Number); marks.push({ s:a, f:b, kind:'reveal' }); }
+      for (const k of picked) { const [a,b] = k.split('_').map(Number); marks.push({ s:a, f:b, kind: ok.has(k) ? 'ok' : 'bad' }); }
+      for (const k of answer.missed) { const [a,b] = k.split('_').map(Number); marks.push({ s:a, f:b, kind:'reveal' }); }
     }
-    // For "lands on", light up the b7s so the half-step slide is visible.
+    // For "lands on", light the b7s so the half-step slide is visible.
     const hl = it.drill === 'ithird' && !answer
       ? new Set(sh.cells.filter(c=>c.deg==='b7').map(c=>ckey(c.s,c.f))) : null;
 
     return (
-      <div>
+      <div style={{ padding:'14px 12px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
           <button onClick={quit} aria-label="End session" style={{ background:'transparent', border:'1px solid #2a2840', color:'#aaa', borderRadius:8, padding:'6px 11px', fontSize:12, fontWeight:700, cursor:'pointer', minHeight:40, touchAction:'manipulation' }}>End</button>
-          <div style={{ flex:1 }}>
+          <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:12, color:'#888' }}>Position {it.shape} · {qi+1} / {queue.length}</div>
             <div style={{ height:4, background:'#1a1928', borderRadius:2, marginTop:4, overflow:'hidden' }}>
               <div style={{ width:`${(qi/queue.length)*100}%`, height:'100%', background:'#e17055' }} />
@@ -942,32 +1034,53 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
 
         <div style={{ ...card, textAlign:'center' }}>
           <div style={{ fontSize:18, fontWeight:900, color:'#e17055' }}>{NOTE_NAMES[it.root]}7alt</div>
-          <div style={{ fontSize:13.5, color:'#ddd', marginTop:6, lineHeight:1.5 }}>{meta.ask}</div>
-          {it.drill !== 'root' && (
+          <div style={{ fontSize:13.5, color:'#ddd', marginTop:6, lineHeight:1.5 }}>
+            {blank ? `Position ${it.shape} — ${meta.ask.toLowerCase()}` : meta.ask}
+          </div>
+          {it.drill !== 'root' && it.drill !== 'build' && it.drill !== 'fill' && (
             <div style={{ fontSize:11, color:'#777', marginTop:5 }}>
-              resolving to {NOTE_NAMES[pc(it.root+5)]} · not a note in the shape
+              {it.drill === 'octave' ? 'the shape is not drawn — find it first'
+                : `resolving to ${NOTE_NAMES[pc(it.root+5)]} · not a note in the shape`}
             </div>
+          )}
+          {blank && (
+            <button onClick={()=>playMidis([48 + it.root])}
+              style={{ marginTop:9, background:'transparent', border:'1px solid #2a2840', color:'#aaa', borderRadius:7, padding:'6px 12px', fontSize:11.5, fontWeight:700, cursor:'pointer', minHeight:36, touchAction:'manipulation' }}>
+              ♪ hear the root
+            </button>
           )}
         </div>
 
-        <div style={{ background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:'10px 6px' }}>
-          <Fretboard cells={sh.cells} root={it.root} labelMode={labelMode} mono
-            win={win} rowH={36} fill highlight={hl} marks={marks}
-            onTapCell={answer ? undefined : tap} />
+        {/* Full-bleed on purpose: the tab's 12px side padding is exactly what
+            drops an 8-fret cell from 44.2px to 42.9px, under the touch minimum.
+            Measured, not guessed. */}
+        <div style={{ background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:'10px 0', margin:'0 -12px' }}>
+          <Fretboard cells={shown} root={it.root} labelMode={labelMode} mono
+            win={win} rowH={36} fill highlight={hl} marks={marks} selected={answer ? null : picked}
+            onTapCell={answer ? undefined : toggle} />
         </div>
+
+        {!answer && (
+          <div style={{ display:'flex', alignItems:'center', gap:9, marginTop:12 }}>
+            <div style={{ fontSize:12, color:'#888', minWidth:74 }}>
+              {picked.size} picked
+              {it.drill === 'fill' && <span style={{ color:'#666' }}> / {ok.size}</span>}
+            </div>
+            <button onClick={()=>setPicked(new Set())} disabled={!picked.size}
+              style={{ background:'transparent', border:'1px solid #2a2840', color:picked.size?'#aaa':'#555', borderRadius:9, padding:'10px 12px', fontSize:12, fontWeight:700, cursor:picked.size?'pointer':'default', minHeight:44, touchAction:'manipulation' }}>Clear</button>
+            <button onClick={check} disabled={!picked.size} style={{ ...primary, flex:1, opacity:picked.size?1:0.45 }}>Check</button>
+          </div>
+        )}
 
         {answer && (
           <div style={{ ...card, marginTop:12, borderColor: answer.correct ? '#2ed57355' : '#ef444455' }}>
             <div style={{ fontSize:13, color: answer.correct ? '#2ed573' : '#ffb4b4', fontWeight:700, lineHeight:1.5 }}>{answer.verdict}</div>
             {!answer.correct && (
-              <>
-                <div style={{ fontSize:11.5, color:'#999', marginTop:6, lineHeight:1.6 }}>
-                  {it.drill === 'root' ? 'The roots in this shape are ringed.'
-                    : `Every ${NOTE_NAMES[targetPc]} in view is ringed.`}
-                </div>
-                <button onClick={()=>{ setAnswer(null); setQi(i=>i+1); }} style={{ ...primary, marginTop:10 }}>Next ›</button>
-              </>
+              <div style={{ fontSize:11.5, color:'#999', marginTop:6, lineHeight:1.6 }}>
+                Green is right, red should not be there, dashed teal is what you missed.
+              </div>
             )}
+            <button onClick={nextQ} style={{ ...primary, marginTop:10 }}>Next ›</button>
           </div>
         )}
       </div>
@@ -981,7 +1094,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
   });
 
   return (
-    <div>
+    <div style={{ padding:'14px 12px' }}>
       <div style={{ ...card, borderColor:'#e1705544' }}>
         <div style={h}>Your focus</div>
         <div style={{ display:'flex', alignItems:'baseline', gap:8, flexWrap:'wrap' }}>
