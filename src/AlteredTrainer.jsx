@@ -261,11 +261,17 @@ function shapeProgress(num, srs, drills) {
   const mastered = st.filter(isLearned).length;
   const nw = st.filter(c => !c).length;
   const due = st.filter(c => c && dayDiff(td, c.nextDue) <= 0).length;
-  // Key coverage counts ONLY the production drills. With the shape drawn the
+  // Key coverage counts ONLY the blank-neck drills. With the shape drawn the
   // picture is the same in every key, so demanding twelve keys of a recognition
   // drill asks for something that is not a skill.
+  //
+  // UNION, not intersection. This used to require a key to have been answered
+  // correctly on EVERY blank-neck drill before it counted, which meant being
+  // right in C on one and D on the other advanced nothing — and pushed
+  // promotion out to about six sessions, roughly twice what it looked like.
+  // "I have played this shape in C" is the honest reading of a key counting.
   const keyed = drills.filter(d => KEY_DRILLS.has(d)).map(d => srs[cardId(num,d)]);
-  const keys = keyed.length ? keyed.reduce((m,c) => m & (c?.keysSeen ?? 0), 0xFFF) : 0;
+  const keys = keyed.reduce((m,c) => m | (c?.keysSeen ?? 0), 0);
   const keyCount = popcount(keys);
   const ready = st.every(c => (c?.reps ?? 0) >= READY_REPS) && keyCount >= READY_KEYS;
   return { mastered, total: drills.length, nw, due, keyCount, ready };
@@ -914,6 +920,8 @@ function GuideTab() {
     { icon:'🎯', title:'How to practise', color:'#e17055', body:
 `Practice names ONE shape as your focus and defaults to it everywhere. That is the whole idea: five shapes learned one at a time beats five shapes half-learned at once.
 
+Reading the focus card: one pill per drill you have switched on, filled green when that drill is solid, blue when you have started it, hollow when you have not. Underneath, how many of the twelve keys you have played the shape in.
+
 Under the focus card is the ladder of all five. Nothing is locked — tap "set" on any row to move the focus yourself. The app suggests; it never blocks.
 
 When a shape is genuinely solid you get a green banner offering the next one. Until then it stays quiet.` },
@@ -923,9 +931,13 @@ When a shape is genuinely solid you get a green banner offering the next one. Un
 
 MASTERED (the dot on a drill) is two correct answers. It is the same bar every other Fretworks trainer uses, so the chip means the same thing here.
 
-READY TO MOVE ON is stricter: every drill you have switched on at three or more correct answers, AND correct in at least six different keys on the blank-neck drills.
+READY TO MOVE ON is stricter: every drill you have switched on at three or more correct answers, AND correct in at least six different keys.
 
-Why the second bar exists: the key changes every question, so two correct answers can both land in the same couple of keys. That is not knowing a shape. Roughly three or four sessions per shape.
+Why the second bar exists: the key changes every question, so two correct answers can both land in the same couple of keys. That is not knowing a shape.
+
+The keys counter under the focus diagram tracks this. It counts a key once you have played the shape correctly in it on either blank-neck drill — Build it or Root to root — because those are the only two where the key changes where the notes are. Six of twelve is the bar; the counter shows 6 as the target rather than 12.
+
+Expect two or three sessions per shape.
 
 "Solid" is not "finished" — cards keep coming back on a spaced schedule. That is what makes them stay.` },
 
@@ -960,7 +972,7 @@ When the shape is DRAWN, the picture is identical in all twelve keys — only th
 
 On an EMPTY NECK it is real work: you have to find the root on the fretboard before you can place anything. The window is eight frets wide with the shape pushed a random number of frets in from the left, so the framing does not tell you where it sits.
 
-That is why only "Build it" and "Root to root" count toward your key coverage. Tap "hear the root" if you want the sound rather than the name.` },
+That is why only "Build it" and "Root to root" count toward your key coverage — being right in G on either one adds G to the count. Tap "hear the root" if you want the sound rather than the name.` },
 
     { icon:'⚡', title:'What the altered scale is', color:'#a29bfe', body:
 `The altered scale is the 7th mode of melodic minor. Over any altered dominant, play melodic minor a HALF STEP ABOVE the chord root:
@@ -1267,7 +1279,16 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
               {on?'●':part?'◐':'○'} {DRILL_META[d].short}
             </span>
           ))}
-          <span style={{ fontSize:11, color:'#777', padding:'4px 0' }}>{prog.keyCount}/12 keys</span>
+        </div>
+        {/* "0/12 keys" meant nothing on its own: 12 is not the target, 6 is, and
+            nothing said where the number came from. */}
+        <div style={{ fontSize:11.5, fontWeight:700, marginBottom:3, color: prog.keyCount >= READY_KEYS ? '#2ed573' : '#aaa' }}>
+          {prog.keyCount >= READY_KEYS ? `✓ Played in ${prog.keyCount} keys` : `Keys ${prog.keyCount} of ${READY_KEYS}`}
+        </div>
+        <div style={{ fontSize:10.5, color:'#666', lineHeight:1.6, marginBottom:10 }}>
+          Counted on Build it and Root to root — the two drills where the key changes
+          where the notes are. Get {READY_KEYS} of them, with every drill above at {READY_REPS} correct
+          answers, and Position {Math.min(5, focusNum+1)} gets suggested.
         </div>
         <button onClick={()=>start([focusNum])} style={primary}>▶ Practise Position {focusNum}</button>
         <button onClick={()=>start([1,2,3,4,5])} style={ghost}>Practise all five{dueTotal ? ` · ${dueTotal} due` : ''}</button>
@@ -1297,13 +1318,23 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
                 <div style={{ fontSize:12.5, fontWeight:800, color:'#fff' }}>
                   Position {l.n} <span style={{ color:'#777', fontWeight:600, fontSize:11 }}>starts on {SHAPE_ANCHOR[SHAPE_ORDER[l.n-1]]}</span>
                 </div>
-                <div style={{ display:'flex', height:5, borderRadius:3, overflow:'hidden', background:'#1a1928', marginTop:5 }}>
-                  <div style={{ flex:l.mastered, background:'#2ed573' }} />
-                  <div style={{ flex:l.total-l.mastered-l.nw, background:'#74b9ff' }} />
-                  <div style={{ flex:l.nw, background:'transparent' }} />
-                </div>
-                <div style={{ fontSize:10, color:'#777', marginTop:4 }}>
-                  {l.ready ? `solid · ${l.keyCount} keys` : l.nw === l.total ? 'not started' : `${l.mastered}/${l.total} drills${l.due?` · ${l.due} due`:''}`}
+                {/* One dot per drill, in the same vocabulary as the focus card
+                    above. The three-colour proportional bar this replaces had
+                    no legend, was 5px tall, and one of its three segments was
+                    transparent — unreadable by construction. */}
+                <div style={{ display:'flex', alignItems:'center', gap:9, marginTop:5 }}>
+                  <span style={{ display:'inline-flex', gap:4 }}>
+                    {pips(l.n).map(({d,on,part}) => (
+                      <span key={d} title={DRILL_META[d].short} style={{ width:8, height:8, borderRadius:'50%', boxSizing:'border-box',
+                        background: on ? '#2ed573' : part ? '#74b9ff' : 'transparent',
+                        border: `1.5px solid ${on ? '#2ed573' : part ? '#74b9ff' : '#3a3852'}` }} />
+                    ))}
+                  </span>
+                  <span style={{ fontSize:10, color:'#777' }}>
+                    {l.ready ? `solid · ${l.keyCount} keys`
+                      : l.nw === l.total ? 'not started'
+                      : `${l.mastered} of ${l.total} drills · keys ${l.keyCount}/${READY_KEYS}${l.due?` · ${l.due} due`:''}`}
+                  </span>
                 </div>
               </div>
               <button onClick={()=>onFocus(l.n)} disabled={isFocus}
@@ -1314,6 +1345,12 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
             </div>
           );
         })}
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap', fontSize:10, marginTop:9, paddingTop:9, borderTop:'1px solid #1a1928' }}>
+          <span style={{ color:'#2ed573' }}>● solid</span>
+          <span style={{ color:'#74b9ff' }}>● started</span>
+          <span style={{ color:'#777' }}>○ not yet</span>
+          <span style={{ color:'#555', marginLeft:'auto' }}>one dot per drill</span>
+        </div>
         <div style={{ fontSize:10.5, color:'#666', lineHeight:1.6, marginTop:8 }}>
           Nothing is locked — the focus is a suggestion. "Solid" is not "finished" either:
           cards keep coming back on a schedule, which is what makes them stay.

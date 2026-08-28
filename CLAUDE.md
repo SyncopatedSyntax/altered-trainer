@@ -134,6 +134,18 @@ half-finished answer.
   so a 2-card focus deck still fills a 12-question session — in a different key
   each time, which is the whole point of drilling one shape.
 
+## Two progress readouts that had to be rewritten
+
+Both were opaque enough that Zak had to ask what they meant, which is the tell.
+
+- **"0/12 keys"** said nothing: 12 is not the target (6 is), and nothing named
+  where the number came from. It now reads `Keys 0 of 6` with a line under it
+  saying it is counted on Build it and Root to root, and what clearing it does.
+- **The ladder's three-colour bar** was 5px tall, had no legend, and one of its
+  three segments was `background:'transparent'` — unreadable by construction.
+  Replaced with one dot per drill in the same green/blue/hollow vocabulary the
+  focus card already uses, plus a single legend at the foot of the ladder.
+
 ## Fretboard drill props
 
 All optional, all no-ops when omitted, so the Positions view is unchanged:
