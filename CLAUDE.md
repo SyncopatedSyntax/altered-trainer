@@ -71,9 +71,12 @@ app's functions (importing them would only prove they agree with themselves).
   Grading is exact: every correct cell, no extras. Accepting any one correct
   cell meant the single root you already knew passed the card forever, which is
   the whole reason the first version did not teach anything.
-- **The target count is never shown.** Telling you there are three roots is most
-  of the answer. `fill` is the exception — the gaps are visible, so the count is
-  free information already.
+- **The count of what you are looking for IS shown** ("2 of 5 found", with a
+  bar). It does not give the answer away, because grading is exact — knowing
+  there are three roots still will not pass you until you have found all three.
+  What it removes is guessing when you are finished, which on an eighteen-note
+  `build` is pure friction. Worded "of", not "/", because the session counter
+  at the top of the same screen is already "1 / 12".
 - **Six drills**, in two families:
   - *Recognition*, shape drawn (mono): `root` (every root in the shape — a root
     elsewhere in the window is a deliberate near-miss state), `ires` (every
@@ -210,10 +213,17 @@ Two things not to undo:
 - **Explorer** — spelling, half-step shortcut, tritone-sub equivalence.
 - **Positions** — 5 positions / 3nps toggle, full-neck, per-note resolution
   overlay (default targets: R + 3rd), audio.
+- **Guide** — collapsible explainer for every feature, same accordion pattern
+  as MelodicMinorTrainer's. It carries the two things that look like bugs until
+  explained: why the position arrows can read 3, 4, 5, 1, 2, and why the key is
+  randomised on every question but only *counts* on the blank-neck ones.
 - **Settings** — defaults (fingering, resolution, target notes, key-selector
   mode), practice drills / session length / key mode, `ProgressBackup`, reset
   progress, reset install banner, Ko-fi button. (Key is remembered, not a
   default.)
+
+The shared key selector under the tab bar is hidden during a drill (each
+question picks its own key) and on Guide/Settings (no diagram to act on).
 
 ## Audio
 iOS silent-switch bypass: the toolbox-standard **two-layer fix** (audioSession

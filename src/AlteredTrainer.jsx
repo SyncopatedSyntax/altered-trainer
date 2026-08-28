@@ -901,6 +901,147 @@ function BannerStack() {
   );
 }
 
+// ── GUIDE TAB ────────────────────────────────────────────────────────────
+// What every part of this app is for. Collapsible accordion, same pattern as
+// MelodicMinorTrainer's Guide so the two read alike.
+//
+// Some of this documents decisions that look like bugs until they are
+// explained — chiefly why the position arrows can run 3, 4, 5, 1, 2, and why
+// the key is randomised on some questions and not others.
+function GuideTab() {
+  const [open, setOpen] = useState(0);
+  const S = [
+    { icon:'🎯', title:'How to practise', color:'#e17055', body:
+`Practice names ONE shape as your focus and defaults to it everywhere. That is the whole idea: five shapes learned one at a time beats five shapes half-learned at once.
+
+Under the focus card is the ladder of all five. Nothing is locked — tap "set" on any row to move the focus yourself. The app suggests; it never blocks.
+
+When a shape is genuinely solid you get a green banner offering the next one. Until then it stays quiet.` },
+
+    { icon:'✅', title:'When a shape counts as solid', color:'#2ed573', body:
+`Two different bars, and they mean different things.
+
+MASTERED (the dot on a drill) is two correct answers. It is the same bar every other Fretworks trainer uses, so the chip means the same thing here.
+
+READY TO MOVE ON is stricter: every drill you have switched on at three or more correct answers, AND correct in at least six different keys on the blank-neck drills.
+
+Why the second bar exists: the key changes every question, so two correct answers can both land in the same couple of keys. That is not knowing a shape. Roughly three or four sessions per shape.
+
+"Solid" is not "finished" — cards keep coming back on a spaced schedule. That is what makes them stay.` },
+
+    { icon:'🔢', title:'The five positions, and why the numbers jump', color:'#74b9ff', body:
+`Position 1 is the shape whose lowest note on the low E string is the ROOT. The other four then start on the next degrees going up: Position 2 on the #9, 3 on the #11, 4 on the b13, 5 on the b7.
+
+A number always means the same grip, in every key. That is the point of them.
+
+So the arrows in Positions may read 3, 4, 5, 1, 2 as you walk up the neck. That is not a bug. The five shapes are a cycle, and which one sits lowest on the neck depends on the key. The label under the arrows tells you where you are on the neck; the title tells you which shape you are holding.
+
+This used to be broken: the shapes were numbered by neck order, so changing key silently swapped which shape "Position 3" meant.` },
+
+    { icon:'✋', title:'The six drills', color:'#2dd4bf', body:
+`Every question is answered by tapping ALL the right notes, then Check. Grading is exact — every correct note, no extras. The counter shows how many there are to find.
+
+WITH THE SHAPE DRAWN:
+• Every root — tap every root in this shape. A root elsewhere on screen is the wrong answer, and the app will say so.
+• Resolves to — tap every place the root of the I chord falls.
+• Lands on — tap every place the b7 resolves to. Off by default.
+• Fill the gaps — five dots are missing. Put them back.
+
+ON AN EMPTY NECK:
+• Root to root — one octave of the shape, lowest root to the next. Always eight notes.
+• Build it — the whole shape, all sixteen to eighteen notes.
+
+Turn any of them on or off in Settings.` },
+
+    { icon:'🔑', title:'When the key actually matters', color:'#ffd93d', body:
+`Every question picks its own key, but it only makes a difference on some of them, and it is worth knowing which.
+
+When the shape is DRAWN, the picture is identical in all twelve keys — only the fret numbers underneath move. So the answer is in the same place every time and the key is just a label.
+
+On an EMPTY NECK it is real work: you have to find the root on the fretboard before you can place anything. The window is eight frets wide with the shape pushed a random number of frets in from the left, so the framing does not tell you where it sits.
+
+That is why only "Build it" and "Root to root" count toward your key coverage. Tap "hear the root" if you want the sound rather than the name.` },
+
+    { icon:'⚡', title:'What the altered scale is', color:'#a29bfe', body:
+`The altered scale is the 7th mode of melodic minor. Over any altered dominant, play melodic minor a HALF STEP ABOVE the chord root:
+
+  G7alt  →  Ab melodic minor
+  D7alt  →  Eb melodic minor
+  B7alt  →  C  melodic minor
+
+Its degrees are R, b9, #9, 3, #11, b13, b7 — every altered tension from one scale.
+
+The tritone sub shares it. Db7 in place of G7 uses the same notes, because a lydian dominant a tritone away is the same set.
+
+The Explorer tab spells all of this out per key.` },
+
+    { icon:'➡️', title:'Resolution — the point of the whole thing', color:'#2dd4bf', body:
+`An altered shape is a launch pad, not a destination. It exists to fall into the I chord a fourth above.
+
+  G7alt  →  C
+
+Two guide tones do the work:
+• The 3 rises a half step to the ROOT of the I.
+• The b7 falls a half step to the 3rd of the I.
+
+Neither target is in the altered scale, which is why the resolution drills are answered on an empty fret rather than on a dot.
+
+In Positions, "Resolve to" overlays those target notes on the diagram: a red hollow square is the 3rd of the I, teal is the root, muted teal the rest.` },
+
+    { icon:'🎨', title:'Reading the diagrams', color:'#e17055', body:
+`Low E is the BOTTOM line, high e the top — the way a fretboard looks when you glance down at it.
+
+Filled circle = a note of the scale. The root has a white ring.
+Hollow square = a note of the I chord you are resolving to.
+Square around a circle = both at once.
+
+Degree colours: red R · purple b9 and #9 · yellow 3 · cyan #11 · dark red b13 · peach b7.
+
+In a drill the dots go plain grey with no labels — otherwise the colours would hand you the answer.
+
+The header toggle switches every label between degrees and note names.` },
+
+    { icon:'⚙️', title:'Settings and your progress', color:'#888', body:
+`Drills — turn any of the six on or off. At least one stays on.
+Questions per session — 8, 12 or 20.
+Key for each question — all twelve, the seven common ones, or pin it to the key you are browsing for a first pass at something new.
+
+Everything is stored on this device only. Nothing is sent anywhere.
+
+Progress backup exports a JSON file you can keep or move to another phone. The Fretworks backup screen at /backup covers this app and every other one in the toolbox in a single sweep.
+
+Reset practice progress erases every drill result and puts the focus back to Position 1. It asks twice.` },
+  ];
+
+  return (
+    <div style={{ padding:'14px 12px' }}>
+      <div style={{ fontSize:12, color:'#888', lineHeight:1.7, marginBottom:12 }}>
+        What everything in this app is for, and why a few things work the way they do.
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:7 }}>
+        {S.map((sec,i) => {
+          const isO = open === i;
+          return (
+            <div key={i} style={{ background:'#13121f', borderRadius:10, border:`1px solid ${isO?sec.color+'55':'#1a1928'}`, overflow:'hidden' }}>
+              <button onClick={()=>setOpen(isO?null:i)}
+                style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'12px 13px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left', minHeight:46, touchAction:'manipulation' }}>
+                <span style={{ fontSize:16 }}>{sec.icon}</span>
+                <span style={{ flex:1, fontSize:13, fontWeight:700, color:'#fff' }}>{sec.title}</span>
+                <span style={{ color:'#555', fontSize:14, transform:isO?'rotate(180deg)':'none', transition:'transform .2s' }}>▾</span>
+              </button>
+              {isO && (
+                <div style={{ padding:'0 13px 14px' }}>
+                  <div style={{ fontSize:12.5, color:'#c8c6da', lineHeight:1.75, whiteSpace:'pre-line' }}>{sec.body.trim()}</div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── PRACTICE TAB ─────────────────────────────────────────────────────────
 // The answer to "which shape am I on, and when do I move on".
 //
@@ -1062,9 +1203,23 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
 
         {!answer && (
           <div style={{ display:'flex', alignItems:'center', gap:9, marginTop:12 }}>
-            <div style={{ fontSize:12, color:'#888', minWidth:74 }}>
-              {picked.size} picked
-              {it.drill === 'fill' && <span style={{ color:'#666' }}> / {ok.size}</span>}
+            {/* How many there are to find. This does NOT give the answer away —
+                grading is exact, so knowing there are three roots still will not
+                pass you until you have found all three. What it removes is
+                having to guess when you are finished, which on an 18-note shape
+                is just friction. */}
+            {/* "1 of 3" rather than "1 / 3": the session counter at the top of
+                the screen is already "1 / 12", and two slashed pairs meaning
+                different things on one screen is a needless puzzle. */}
+            <div style={{ minWidth:84 }}>
+              <div style={{ fontSize:12.5, fontWeight:800, fontFamily:'monospace', color: picked.size === ok.size ? '#2ed573' : '#aaa' }}>
+                {picked.size} of {ok.size}
+              </div>
+              <div style={{ fontSize:9.5, color:'#666', letterSpacing:'.4px', marginTop:1 }}>FOUND</div>
+              <div style={{ height:3, background:'#1a1928', borderRadius:2, marginTop:4, overflow:'hidden' }}>
+                <div style={{ width:`${Math.min(100, (picked.size / ok.size) * 100)}%`, height:'100%',
+                  background: picked.size === ok.size ? '#2ed573' : '#e17055', transition:'width .15s' }} />
+              </div>
             </div>
             <button onClick={()=>setPicked(new Set())} disabled={!picked.size}
               style={{ background:'transparent', border:'1px solid #2a2840', color:picked.size?'#aaa':'#555', borderRadius:9, padding:'10px 12px', fontSize:12, fontWeight:700, cursor:picked.size?'pointer':'default', minHeight:44, touchAction:'manipulation' }}>Clear</button>
@@ -1289,7 +1444,7 @@ export default function App() {
     return () => { document.head.removeChild(style); window.removeEventListener('scroll', lock); };
   }, []);
 
-  const TABS = [{id:'practice',label:'Practice',icon:'🎯'},{id:'explorer',label:'Explorer',icon:'🧭'},{id:'positions',label:'Positions',icon:'🎸'},{id:'settings',label:'Settings',icon:'⚙️'}];
+  const TABS = [{id:'practice',label:'Practice',icon:'🎯'},{id:'explorer',label:'Explorer',icon:'🧭'},{id:'positions',label:'Positions',icon:'🎸'},{id:'guide',label:'Guide',icon:'📖'},{id:'settings',label:'Settings',icon:'⚙️'}];
   const CW = 600; // centered content max-width (matches ChordTrainer)
 
   return (
@@ -1303,9 +1458,11 @@ export default function App() {
       <TabBar toolKey="alt" tabs={TABS} active={tab} onChange={(id)=>{setTab(id); if(scrollRef.current)scrollRef.current.scrollTop=0;}} />
 
       {/* key selector: V7alt root <-> resolution key — below the tabs, full-bleed border, centered inner.
-          Hidden during a drill: every question picks its own key, so leaving this
-          up would show a key that contradicts the card in front of you. */}
-      {!drilling && <div style={{ borderBottom:'1px solid #1a1928' }}>
+          Hidden during a drill, because every question picks its own key and
+          leaving this up would show a key that contradicts the card. Also
+          hidden on Guide and Settings, where there is no diagram for it to
+          act on. */}
+      {!drilling && tab !== 'guide' && tab !== 'settings' && <div style={{ borderBottom:'1px solid #1a1928' }}>
        <div style={{ padding:'8px 10px', maxWidth:CW, margin:'0 auto' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:7 }}>
           <div style={{ display:'flex', gap:5 }}>
@@ -1337,6 +1494,7 @@ export default function App() {
           {tab==='explorer' && <ExplorerTab root={root} labelMode={labelMode} />}
           {tab==='practice' && <PracticeTab root={root} labelMode={labelMode} settings={settings} srs={srs} onGrade={grade} focus={focus} onFocus={moveFocus} onSession={setDrilling} />}
           {tab==='positions' && <PositionsTab root={root} labelMode={labelMode} settings={settings} shapeNum={shapeNum} onShapeNum={setShapeNum} focusNum={focus.shape} onFocus={moveFocus} onPractise={()=>setTab('practice')} />}
+          {tab==='guide' && <GuideTab />}
           {tab==='settings' && <SettingsTab settings={settings} onChange={setSettings} onResetProgress={resetProgress} />}
         </div>
       </div>
