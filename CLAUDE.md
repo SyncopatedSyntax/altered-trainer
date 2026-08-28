@@ -31,6 +31,16 @@ user: Zak. Shared publicly via Ko-fi `syncopatedsyntax`.
   (the CAGED shape you are on, as a stable number), `at_srs`, `at_focus`,
   `at_ios_hint`. `at_pos` is **retired** — it held a neck index, which the
   numbering fix made meaningless; it is migrated once and deleted.
+- **Every persist effect must wait for the load.** `store.get` is async, so the
+  loader yields at its first `await` — and React then runs the write effects,
+  putting the *defaults* into localStorage before the loader has read
+  `at_label` and `at_settings`. It then read back what it had just written, and
+  every preference was silently lost on reload. `at_root` escaped only by
+  accident, being read synchronously inside `store.get`'s body before the yield.
+  All four write effects are now gated on a `prefsLoaded` ref. A consequence
+  worth knowing: nothing is written until a value actually changes, so a fresh
+  install has no `at_root` until a key is picked. That is correct — do not
+  "fix" it by writing defaults on mount, which is the bug.
 - **Everything is written as JSON.** `ProgressBackup` JSON-parses on export and
   always JSON-stringifies on import, so a bare string round-trips back with
   quotes around it. `at_label` used to store `degrees` and would have come back

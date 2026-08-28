@@ -1411,9 +1411,18 @@ export default function App() {
     try { const f = jstore.get('at_focus', null); if (f && f.shape >= 1 && f.shape <= 5) setFocus(f); } catch(e){}
     prefsLoaded.current = true;
   })(); }, []);
-  useEffect(() => { store.set('at_root', String(root)); }, [root]);
-  useEffect(() => { store.set('at_label', JSON.stringify(labelMode)); }, [labelMode]);
-  useEffect(() => { store.set('at_settings', JSON.stringify(settings)); }, [settings]);
+  // ALL of these must wait for the load above, and the reason is easy to get
+  // wrong. `store.get` is async, so the loader yields at its first await —
+  // and React then runs these effects, writing the DEFAULTS over localStorage
+  // before the loader has got round to reading at_label and at_settings. It
+  // then read back the defaults it had just written, and every preference was
+  // silently lost on reload.
+  //
+  // at_root escaped only by accident: it is read first, synchronously inside
+  // store.get's body, before the yield. Nothing else was.
+  useEffect(() => { if (prefsLoaded.current) store.set('at_root', String(root)); }, [root]);
+  useEffect(() => { if (prefsLoaded.current) store.set('at_label', JSON.stringify(labelMode)); }, [labelMode]);
+  useEffect(() => { if (prefsLoaded.current) store.set('at_settings', JSON.stringify(settings)); }, [settings]);
   // Gated on the load: this effect also runs on mount, and without the guard it
   // would write the default 1 over a stored value before the async read above
   // has got to it.
