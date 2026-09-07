@@ -1366,9 +1366,9 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
 export default function App() {
   const [root, setRoot] = useState(7);          // G7alt default
   const [labelMode, setLabelMode] = useState('degrees');
-  // Practice is the landing screen: the problem it solves is "which shape am I
-  // supposed to be working on", and that has to be the first thing you see.
-  const [tab, setTab] = useState('practice');
+  // Positions is the landing screen — browse the shapes first; Practice sits
+  // right after it for when you're ready to drill one.
+  const [tab, setTab] = useState('positions');
   const [keyMode, setKeyMode] = useState('dom'); // 'dom' (V7alt root) | 'tonic' (resolution key)
   const [settings, setSettings] = useState({ defSystem:'caged', defKind:'maj', defNotes:['R','3'], defKeyMode:'dom' });
   // Which CAGED shape you are on, as a stable position number (1-5). Lives here
@@ -1490,7 +1490,7 @@ export default function App() {
     return () => { document.head.removeChild(style); window.removeEventListener('scroll', lock); };
   }, []);
 
-  const TABS = [{id:'practice',label:'Practice',icon:'🎯'},{id:'explorer',label:'Explorer',icon:'🧭'},{id:'positions',label:'Positions',icon:'🎸'},{id:'guide',label:'Guide',icon:'📖'},{id:'settings',label:'Settings',icon:'⚙️'}];
+  const TABS = [{id:'positions',label:'Positions',icon:'🎸'},{id:'practice',label:'Practice',icon:'🎯'},{id:'explorer',label:'Explorer',icon:'🧭'},{id:'guide',label:'Guide',icon:'📖'},{id:'settings',label:'Settings',icon:'⚙️'}];
   const CW = 600; // centered content max-width (matches ChordTrainer)
 
   return (

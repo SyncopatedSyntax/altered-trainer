@@ -229,12 +229,13 @@ Two things not to undo:
   selector (picking one auto-sets the other). App remembers the last key.
 
 ## Tabs (current scope)
-- **Practice** (default) — the focus shape, its drills, the ready-to-move-on
-  banner, and the five-shape ladder. The landing screen on purpose: the problem
-  it solves is "which shape am I supposed to be working on".
+- **Positions** (default, first) — 5 positions / 3nps toggle, full-neck,
+  per-note resolution overlay (default targets: R + 3rd), audio. Landing tab:
+  browse and hear the shapes before drilling one.
+- **Practice** — the focus shape, its drills, the ready-to-move-on banner, and
+  the five-shape ladder. Sits right after Positions for when you're ready to
+  drill what you were just looking at.
 - **Explorer** — spelling, half-step shortcut, tritone-sub equivalence.
-- **Positions** — 5 positions / 3nps toggle, full-neck, per-note resolution
-  overlay (default targets: R + 3rd), audio.
 - **Guide** — collapsible explainer for every feature, same accordion pattern
   as MelodicMinorTrainer's. It carries the two things that look like bugs until
   explained: why the position arrows can read 3, 4, 5, 1, 2, and why the key is
