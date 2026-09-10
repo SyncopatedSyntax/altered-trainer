@@ -72,7 +72,7 @@ in a given key — that is correct, not a bug: the five shapes are a cycle.
 `scripts/verify.mjs` is the gate — run it before and after any change here.
 It re-derives every transform from first principles rather than importing the
 app's functions (importing them would only prove they agree with themselves).
-1483 assertions.
+3854 assertions.
 
 - **Cards are `shape|drill`**, 5 shapes × up to 6 drills. The key is a per-rep
   variable, never part of the card id — the toolbox's rule that the unit of
@@ -141,8 +141,59 @@ half-finished answer.
   where you happen to be browsing. They are separate so wandering off in
   Positions does not rewrite the plan, and nothing is ever locked.
 - The queue is three-tier (due → new → not-yet-due) and **cycles with modulo**,
-  so a 2-card focus deck still fills a 12-question session — in a different key
-  each time, which is the whole point of drilling one shape.
+  so a small focus deck still fills a session — in a different key each time,
+  which is the whole point of drilling one shape. **Two exceptions**, both in
+  `buildQueue`:
+  - `dueOnly` does not pad at all. "7 cards due" has to mean a 7-question
+    session, or the number on the button is a lie.
+  - A narrow pool gets `pool.length * READY_REPS` questions, capped at
+    `sessionN`. One drill on one shape is a **one-card** pool, and a position's
+    picture is identical in all twelve keys — so padding it to 12 is the same
+    question twelve times. Three reps is enough to reach the readiness bar for
+    the cards actually in the pool. (A deliberately-narrowed 2-drill focus deck
+    therefore runs 6 questions, not 12. That is the intended trade.)
+
+## Planning: what is due, and which drill is weak
+
+`shapeProgress` answers "how is Position 3 doing" by collapsing the drills into
+counts — which is the wrong axis for "fine on root-to-root, poor on the
+resolving notes", since the drill is exactly what it discards. The planning
+helpers are its transpose, and they are all **derived from `at_srs`**: no new
+storage key, so none of this touches the `prefsLoaded` write-effect trap.
+
+- `drillProgress(drill, srs, shapes)` — one drill across the shapes.
+- `weakestDrills(...)` — worst accuracy first, but only past `WEAK_MIN_SEEN`
+  (4) attempts and under `WEAK_ACC` (0.8). One miss on a twice-seen card is
+  noise, and ranking it top sends you to drill the wrong thing.
+- `nextUp(srs, drills, focusNum)` — **one** recommendation with its reason.
+  Priority: due ▸ untried on the focus shape ▸ weakest ▸ nothing owing.
+- `forecastStacked(cards, srs, days)` — ported from Triad Trainer, stacked by
+  **position**. Never-reviewed cards go in `newCount` and in **no bucket**;
+  dropping them is what made a Standards Trainer tune read "4 due now" over a
+  bar of 1.
+
+**`seen` was already being written and never read.** Its partner `wrong` is what
+makes real accuracy possible, so Weak spots can say "20 of 48 right" instead of
+a vague "needs work" — the kind of readout Zak has twice had to ask about.
+Absent reads as 0, so old progress loads fine; it just reads as 100% until fresh
+misses accrue. **Do not back-fill it from `reps`/`ef`** — a guess dressed as a
+measurement is worse than a number that is briefly optimistic.
+
+**Weakness is measured across all five shapes**, so a drill you are shaky on in
+one position is correctly averaged out of Weak spots. That case is not lost: the
+focus card names the weakest drill *on the focus shape* on its own line.
+`verify.mjs` pins both halves of this.
+
+### Sessions are scoped, not just shape-filtered
+
+`start({ shapes, only, dueOnly, label })` is the single entry point. `only`
+narrows by drill — that is the entire weak-aspect mechanism. `label` exists
+because the running header used to say `Position N`, which stops being true the
+moment a session spans positions; the header now names the **session** and the
+per-question position moved into the prompt, unconditionally.
+
+The ladder's ▶ practises a shape **without moving the focus** — the focus is the
+plan, and shoring up Position 5 is not a new plan.
 
 ## Two progress readouts that had to be rewritten
 
@@ -232,9 +283,11 @@ Two things not to undo:
 - **Positions** (default, first) — 5 positions / 3nps toggle, full-neck,
   per-note resolution overlay (default targets: R + 3rd), audio. Landing tab:
   browse and hear the shapes before drilling one.
-- **Practice** — the focus shape, its drills, the ready-to-move-on banner, and
-  the five-shape ladder. Sits right after Positions for when you're ready to
-  drill what you were just looking at.
+- **Practice** — Next up (one recommended action), the focus shape and its
+  drills, the ready-to-move-on banner, Weak spots, the five-shape ladder, and a
+  seven-day forecast. Sits right after Positions for when you're ready to drill
+  what you were just looking at. Ordered actionable-first, reference-last: the
+  forecast is the one card you read rather than act on, so it goes at the foot.
 - **Explorer** — spelling, half-step shortcut, tritone-sub equivalence.
 - **Guide** — collapsible explainer for every feature, same accordion pattern
   as MelodicMinorTrainer's. It carries the two things that look like bugs until

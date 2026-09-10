@@ -456,6 +456,170 @@ check('key coverage is tracked, so reps alone cannot fake mastery', () => {
   eq(popcount(0xFFF), 12, 'all twelve keys');
 });
 
+console.log('\nPractice planning');
+
+// Same rule as everywhere else in this file: the app's helpers are NOT
+// imported, they are restated. What follows is an independent implementation of
+// what drillProgress / weakestDrills / nextUp / forecastStacked / buildQueue are
+// supposed to do, run against synthetic schedules.
+const dayDiff2 = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+const DRILLS_V = literal('DRILLS');
+const WEAK_MIN_SEEN_V = 4, WEAK_ACC_V = 0.8, READY_REPS_V = 3;
+const cid = (n, d) => `${n}|${d}`;
+const cards5 = ds => { const o = []; for (let n = 1; n <= 5; n++) for (const d of ds) o.push({ id: cid(n, d), shape: n, drill: d }); return o; };
+const isLearned2 = c => !!c && c.reps >= 2;
+const dueOn2 = (c, td) => !!c && dayDiff2(td, c.nextDue) <= 0;
+
+function drillProgress2(drill, srs, shapes = [1, 2, 3, 4, 5]) {
+  const td = todayStr();
+  const st = shapes.map(n => srs[cid(n, drill)]);
+  const seen = st.reduce((a, c) => a + (c?.seen ?? 0), 0);
+  const wrong = st.reduce((a, c) => a + (c?.wrong ?? 0), 0);
+  return { drill, started: st.filter(Boolean).length, solid: st.filter(isLearned2).length,
+    total: shapes.length, due: st.filter(c => dueOn2(c, td)).length,
+    seen, right: seen - wrong, acc: seen ? (seen - wrong) / seen : null };
+}
+
+check('drillProgress is the exact transpose of shapeProgress', () => {
+  // Every card counted once on each axis, so the two totals must agree.
+  const ds = ['root', 'ires', 'fill', 'octave', 'build'];
+  const srs = {};
+  let expectSolid = 0;
+  for (let n = 1; n <= 5; n++) for (let i = 0; i < ds.length; i++) {
+    const reps = (n + i) % 4;                      // 0..3, a spread of states
+    if (reps === 0) continue;                       // leave some never-seen
+    srs[cid(n, ds[i])] = { ef: 2.5, interval: 1, reps, nextDue: addDays(todayStr(), 5), seen: reps, wrong: 0 };
+    if (reps >= 2) expectSolid++;
+  }
+  const byDrill = ds.reduce((a, d) => a + drillProgress2(d, srs).solid, 0);
+  const byShape = [1, 2, 3, 4, 5].reduce((a, n) => a + ds.filter(d => isLearned2(srs[cid(n, d)])).length, 0);
+  eq(byDrill, byShape, 'solid counted per-drill vs per-shape');
+  eq(byDrill, expectSolid, 'solid total');
+});
+
+check('accuracy is honest, and absent history is not a zero', () => {
+  const srs = { [cid(1, 'ires')]: { reps: 1, seen: 10, wrong: 4, nextDue: addDays(todayStr(), 3) } };
+  eq(drillProgress2('ires', srs).acc, 0.6, '6 of 10');
+  eq(drillProgress2('ires', srs).right, 6, 'right count');
+  // A card written before `wrong` existed must read as unknown-but-clean, and
+  // above all must not read as 0% and top the weak list on day one.
+  const legacy = { [cid(1, 'root')]: { reps: 3, seen: 7, nextDue: addDays(todayStr(), 3) } };
+  eq(drillProgress2('root', legacy).acc, 1, 'legacy entry with no wrong field');
+  // Never attempted is null, NOT 0 — 0 would sort it top of "weakest".
+  eq(drillProgress2('build', {}).acc, null, 'never attempted');
+});
+
+function weakest2(srs, ds, n = 3) {
+  return ds.map(d => drillProgress2(d, srs))
+    .filter(p => p.seen >= WEAK_MIN_SEEN_V && p.acc < WEAK_ACC_V)
+    .sort((a, b) => a.acc - b.acc || a.solid - b.solid || DRILLS_V.indexOf(a.drill) - DRILLS_V.indexOf(b.drill))
+    .slice(0, n);
+}
+
+check('weakest drills rank by accuracy, and ignore too little evidence', () => {
+  const mk = (seen, wrong) => ({ reps: 2, seen, wrong, nextDue: addDays(todayStr(), 4) });
+  const srs = {
+    [cid(1, 'ires')]:   mk(10, 5),   // 50%
+    [cid(1, 'build')]:  mk(10, 1),   // 90% - above the bar, excluded
+    [cid(1, 'octave')]: mk(8, 2),    // 75%
+    [cid(1, 'fill')]:   mk(2, 2),    //  0% but only 2 attempts - too little to judge
+  };
+  const w = weakest2(srs, ['root', 'ires', 'ithird', 'fill', 'octave', 'build']);
+  eq(w.length, 2, 'two drills qualify');
+  eq(w[0].drill, 'ires', 'worst first');
+  eq(w[1].drill, 'octave', 'then the next worst');
+  assertions++; if (w.some(x => x.drill === 'fill')) fail('a drill under the evidence floor must not be called weak');
+  assertions++; if (w.some(x => x.drill === 'build')) fail('90% is not a weak spot');
+  // Ties must not reorder run to run.
+  const tie = { [cid(1, 'root')]: mk(10, 5), [cid(1, 'ires')]: mk(10, 5) };
+  eq(weakest2(tie, ['root', 'ires']).map(x => x.drill).join(','), 'root,ires', 'ties are deterministic');
+});
+
+check('nextUp puts due work first, then untried, then weak, then clear', () => {
+  const ds = ['root', 'ires', 'fill', 'octave', 'build'];
+  const far = addDays(todayStr(), 9);
+  const full = (extra = {}) => { const o = {}; for (let n = 1; n <= 5; n++) for (const d of ds) o[cid(n, d)] = { reps: 3, seen: 5, wrong: 0, nextDue: far }; return { ...o, ...extra }; };
+
+  const kindOf = (srs, focusNum = 1) => {
+    const td = todayStr();
+    if (cards5(ds).some(c => dueOn2(srs[c.id], td))) return 'due';
+    if (ds.some(d => !srs[cid(focusNum, d)])) return 'focus-new';
+    if (weakest2(srs, ds, 1).length) return 'weak';
+    return 'clear';
+  };
+  eq(kindOf(full({ [cid(4, 'ires')]: { reps: 1, seen: 2, wrong: 0, nextDue: addDays(todayStr(), -2) } })), 'due', 'overdue wins');
+  eq(kindOf({}), 'focus-new', 'a fresh install has untried drills');
+  // Weakness is measured ACROSS the shapes, so one bad shape among five clean
+  // ones is correctly diluted below the bar — that is the point of the card.
+  // It takes a drill that is shaky broadly to register.
+  const shaky = {}; for (const n of [1, 2, 3]) shaky[cid(n, 'ires')] = { reps: 3, seen: 10, wrong: 6, nextDue: far };
+  eq(kindOf(full(shaky)), 'weak', 'weak when nothing is owing');
+  eq(kindOf(full({ [cid(2, 'ires')]: { reps: 3, seen: 10, wrong: 6, nextDue: far } })), 'clear',
+    'one shaky shape out of five is not a cross-cutting weak spot');
+  eq(kindOf(full()), 'clear', 'all done, nothing weak');
+});
+
+check('a due-only session is exactly the cards that are owing', () => {
+  const ds = ['root', 'ires', 'fill', 'octave', 'build'];
+  const td = todayStr();
+  const srs = {};
+  for (let n = 1; n <= 5; n++) for (const d of ds) srs[cid(n, d)] = { reps: 2, seen: 4, wrong: 0, nextDue: addDays(td, 6) };
+  const dueIds = [cid(1, 'root'), cid(3, 'ires'), cid(5, 'build')];
+  for (const id of dueIds) srs[id].nextDue = addDays(td, -1);
+
+  const pool = cards5(ds).filter(c => dueOn2(srs[c.id], td));
+  eq(pool.length, 3, 'three cards due');
+  const n = Math.min(12, pool.length);
+  eq(n, 3, 'the session is as long as the due list, NOT the session length');
+  const q = []; while (q.length < n) q.push(pool[q.length % pool.length]);
+  eq(new Set(q.map(c => c.id)).size, 3, 'no card is asked twice');
+  eq(q.map(c => c.id).sort().join('|'), dueIds.sort().join('|'), 'exactly the due cards');
+});
+
+check('a narrow session gets a proportionate length, not a padded one', () => {
+  // A position's picture is identical in all twelve keys (asserted above), so
+  // padding a one-card pool to a full session is the same question 12 times.
+  const len = (poolSize, sessionN = 12) => Math.min(sessionN, poolSize * READY_REPS_V);
+  eq(len(1), 3, 'one drill on one shape');
+  eq(len(2), 6, 'a two-card deck');
+  eq(len(5), 12, 'one drill across five shapes, capped by the session length');
+  eq(len(25), 12, 'the whole deck is still capped');
+  eq(len(5, 8), 8, 'a shorter session setting still wins');
+  assertions++; if (len(1) < READY_REPS_V) fail('a scoped session must still allow the readiness bar to be reached');
+});
+
+check('the forecast counts never-seen cards as new, and in no bucket', () => {
+  // Dropping them is the bug that made a Standards Trainer tune read "4 due
+  // now" over a bar of 1.
+  const ds = ['root', 'ires'];
+  const td = todayStr();
+  const srs = {
+    [cid(1, 'root')]: { reps: 2, nextDue: addDays(td, -3) },   // overdue
+    [cid(1, 'ires')]: { reps: 2, nextDue: addDays(td, 3) },
+    [cid(2, 'root')]: { reps: 2, nextDue: addDays(td, 30) },   // past the window
+  };
+  const days = 7;
+  const buckets = Array.from({ length: days }, () => ({ total: 0, byShape: [0, 0, 0, 0, 0] }));
+  let newCount = 0, dueToday = 0, soonest = null;
+  for (const c of cards5(ds)) {
+    const e = srs[c.id];
+    if (!e) { newCount++; continue; }
+    const d = dayDiff2(td, e.nextDue);
+    if (d <= 0) dueToday++;
+    if (soonest === null || d < soonest) soonest = d;
+    const i = Math.max(0, Math.min(days - 1, d));
+    buckets[i].total++; buckets[i].byShape[c.shape - 1]++;
+  }
+  eq(newCount, 7, 'ten cards, three scheduled');
+  eq(dueToday, 1, 'one overdue');
+  eq(buckets[0].total, 1, 'overdue clamps into bucket 0');
+  eq(buckets[3].total, 1, 'due in 3 days lands in bucket 3');
+  eq(buckets[6].total, 1, 'beyond the window clamps into the last bucket');
+  eq(buckets[0].byShape[0], 1, 'stacked by position');
+  eq(soonest, -3, 'soonest is the most overdue');
+  eq(buckets.reduce((a, b) => a + b.total, 0) + newCount, 10, 'every card is accounted for exactly once');
+});
+
 console.log('\nStorage round-trips');
 
 check('every persisted value survives a ProgressBackup round trip', () => {

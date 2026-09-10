@@ -254,13 +254,14 @@ const winOf = sh => ({ lo: Math.max(0, sh.lo-1), hi: sh.hi+1 });
 // while promotion is stricter. With a random key every rep, reps>=2 can be
 // earned twice in one sitting in two keys - which is not knowing a shape. The
 // 12-bit keysSeen mask is what makes "across N keys" measurable.
+const dueOn = (c, td) => !!c && dayDiff(td, c.nextDue) <= 0;
 const READY_REPS = 3, READY_KEYS = 6;
 function shapeProgress(num, srs, drills) {
   const st = drills.map(d => srs[cardId(num,d)]);
   const td = todayStr();
   const mastered = st.filter(isLearned).length;
   const nw = st.filter(c => !c).length;
-  const due = st.filter(c => c && dayDiff(td, c.nextDue) <= 0).length;
+  const due = st.filter(c => dueOn(c, td)).length;
   // Key coverage counts ONLY the blank-neck drills. With the shape drawn the
   // picture is the same in every key, so demanding twelve keys of a recognition
   // drill asks for something that is not a skill.
@@ -277,19 +278,112 @@ function shapeProgress(num, srs, drills) {
   return { mastered, total: drills.length, nw, due, keyCount, ready };
 }
 
+// ── Which drill is weak, and what is due ─────────────────────────────────
+// shapeProgress above answers "how is Position 3 doing" by collapsing the
+// drills into counts. That is the wrong axis for "I am fine on root-to-root
+// but poor on the resolving notes": the drill is exactly what it throws away.
+// Everything below is the transpose, plus the planning that falls out of it.
+
+// One drill, across the shapes. `acc` is null until the drill has been
+// attempted at all, so a card with no history reads as "unknown", never 0%.
+function drillProgress(drill, srs, shapes = [1,2,3,4,5]) {
+  const td = todayStr();
+  const st = shapes.map(n => srs[cardId(n,drill)]);
+  const seen  = st.reduce((a,c) => a + (c?.seen  ?? 0), 0);
+  const wrong = st.reduce((a,c) => a + (c?.wrong ?? 0), 0);
+  return {
+    drill,
+    started: st.filter(Boolean).length,
+    solid:   st.filter(isLearned).length,
+    total:   shapes.length,
+    due:     st.filter(c => dueOn(c, td)).length,
+    seen, right: seen - wrong,
+    acc: seen ? (seen - wrong) / seen : null,
+  };
+}
+
+// Enough attempts to be worth calling weak. One miss on a card you have seen
+// twice is noise, and putting it top of a "weak spots" list would send you to
+// drill the wrong thing.
+// Five tints of the focus orange, P1 lightest. Position is the right stack for
+// the forecast — "when does Position 4 come back" is the question being asked.
+const FC_TINT = ['#f0a58e', '#e88b6e', '#e17055', '#c25a42', '#9e4632'];
+const WEAK_MIN_SEEN = 4, WEAK_ACC = 0.8;
+function weakestDrills(srs, drills, shapes = [1,2,3,4,5], n = 3) {
+  return drills
+    .map(d => drillProgress(d, srs, shapes))
+    .filter(p => p.seen >= WEAK_MIN_SEEN && p.acc < WEAK_ACC)
+    .sort((a,b) => a.acc - b.acc || a.solid - b.solid || DRILLS.indexOf(a.drill) - DRILLS.indexOf(b.drill))
+    .slice(0, n);
+}
+
+// ONE recommendation, with its reason. The priority order is the whole point:
+// due work first (that is what spaced repetition is for), then anything on the
+// focus shape you have never tried, then the weakest thing you have tried, and
+// only then "nothing is owing".
+function nextUp(srs, drills, focusNum) {
+  const td = todayStr();
+  const due = buildCards(drills).filter(c => dueOn(srs[c.id], td));
+  if (due.length) {
+    return { kind:'due', count: due.length, shapes: [...new Set(due.map(c => c.shape))].sort((a,b)=>a-b) };
+  }
+  const fresh = drills.filter(d => !srs[cardId(focusNum,d)]);
+  if (fresh.length) return { kind:'focus-new', count: fresh.length, shapes:[focusNum] };
+  const weak = weakestDrills(srs, drills, [1,2,3,4,5], 1)[0];
+  if (weak) return { kind:'weak', ...weak };
+  const days = buildCards(drills).map(c => srs[c.id]).filter(Boolean).map(c => dayDiff(td, c.nextDue));
+  return { kind:'clear', soonest: days.length ? Math.min(...days) : null };
+}
+
+// Ported from triads-trainer/src/TriadTrainer.jsx (forecastStacked), stacked by
+// POSITION rather than Triad's dimension model — "when does Position 4 come
+// back" is the question being asked here.
+//
+// Never-reviewed cards are counted in `newCount` and put in NO bucket. Dropping
+// them silently is the bug that made a Standards Trainer tune read "4 due now"
+// over a bar of 1.
+function forecastStacked(cards, srs, days = 7) {
+  const td = todayStr();
+  const buckets = Array.from({ length: days }, () => ({ total: 0, byShape: [0,0,0,0,0] }));
+  let newCount = 0, dueToday = 0, soonest = null;
+  for (const c of cards) {
+    const e = srs[c.id];
+    if (!e) { newCount++; continue; }
+    const d = dayDiff(td, e.nextDue);
+    if (d <= 0) dueToday++;
+    if (soonest === null || d < soonest) soonest = d;
+    const i = Math.max(0, Math.min(days - 1, d));
+    buckets[i].total++;
+    buckets[i].byShape[c.shape - 1]++;
+  }
+  return { buckets, newCount, dueToday, soonest };
+}
+
 // Three tiers, not two. A focus deck is 2-3 cards; with due-then-new only, a
 // session would end after three taps. The modulo cycle keeps it going so the
 // same shape comes round several times in DIFFERENT keys, which is the whole
 // point of drilling one shape.
-function buildQueue(cards, srs, count, pickKey) {
+//
+// Two exceptions to that padding, both deliberate:
+//
+// `dueOnly` does not pad at all. Padding a "7 cards due" session out to 12
+// makes the headline number a lie, and the number is the reason you tapped it.
+//
+// A NARROW pool gets a proportionate session. Drilling one drill on one shape
+// is a pool of exactly one card, and a position's picture is identical in all
+// twelve keys — so twelve reps of a recognition drill is the same question
+// twelve times over. `pool.length * READY_REPS` is enough to clear the
+// readiness bar for the cards actually in the pool, and no more.
+function buildQueue(cards, srs, count, pickKey, { dueOnly = false } = {}) {
   const td = todayStr();
-  const due  = shuffle(cards.filter(c =>  srs[c.id] && dayDiff(td, srs[c.id].nextDue) <= 0));
+  const due  = shuffle(cards.filter(c =>  dueOn(srs[c.id], td)));
   const nw   = shuffle(cards.filter(c => !srs[c.id]));
-  const rest = shuffle(cards.filter(c =>  srs[c.id] && dayDiff(td, srs[c.id].nextDue) >  0));
-  const pool = [...due, ...nw, ...rest];
+  const rest = shuffle(cards.filter(c =>  srs[c.id] && !dueOn(srs[c.id], td)));
+  const pool = dueOnly ? due : [...due, ...nw, ...rest];
   if (!pool.length) return [];
+  const n = Math.min(count, dueOnly ? pool.length : pool.length * READY_REPS);
   const q = [];
-  while (q.length < count) q.push(pool[q.length % pool.length]);
+  while (q.length < n) q.push(pool[q.length % pool.length]);
   // The key, the window offset and the fill blanks are all decided here, once,
   // so nothing can reshuffle under the answer.
   return q.map((c,i) => ({ ...c, root: pickKey(), off: ri(4), seed: (Date.now() + i*7919) | 0 }));
@@ -922,9 +1016,36 @@ function GuideTab() {
 
 Reading the focus card: one pill per drill you have switched on, filled green when that drill is solid, blue when you have started it, hollow when you have not. Underneath, how many of the twelve keys you have played the shape in.
 
-Under the focus card is the ladder of all five. Nothing is locked — tap "set" on any row to move the focus yourself. The app suggests; it never blocks.
+Those pills are BUTTONS. Tap one to drill just that aspect on just this shape — five or six questions of nothing but "tap every place it resolves to", if that is the bit you keep fluffing.
+
+Under the focus card is the ladder of all five. Nothing is locked — tap "set" on any row to move the focus yourself, or the ▶ to practise that shape WITHOUT moving your focus. The app suggests; it never blocks.
 
 When a shape is genuinely solid you get a green banner offering the next one. Until then it stays quiet.` },
+
+    { icon:'📍', title:'Next up, and what is due', color:'#e17055', body:
+`The card at the top of Practice answers one question — what should I do right now — and it only ever offers one thing.
+
+It works down a priority list. Anything the schedule says is due comes first, because that is the moment a card is about to slip. If nothing is due, it offers the drills on your focus shape you have never tried. If there are none of those, it offers your weakest drill. If none of that applies, it says so and offers a free pass anyway.
+
+"Review what's due" is exactly the cards that are owing — if it says 7 cards, the session is 7 questions and then it stops. It does not pad the session out to your usual length, because then the number on the button would not be the number of questions.
+
+The ladder shows a "N due" badge on any shape with work owing, so you can see at a glance which of the five is behind.` },
+
+    { icon:'💪', title:'Weak spots', color:'#ff6b6b', body:
+`You can be fine at finding roots and poor at spotting where a line resolves. The five pills only tell you whether you have PASSED a drill, not how often you got it wrong on the way — so there is a Weak spots card that counts it properly.
+
+It shows a drill's record as "20 of 48 right", counted across all five shapes, and only once you have attempted it at least four times. Less evidence than that is noise, and sending you off to drill the wrong thing is worse than saying nothing.
+
+Because it is counted across all five shapes, a drill you are shaky on in ONE position gets averaged out. That case is covered separately: the focus card names your weakest drill on the shape you are actually working on.
+
+Tapping "▶ drill" runs that one drill across every shape. Tapping a pill on the focus card runs it on that shape only.
+
+One caveat worth knowing: the tally started when this feature was added, so anything you practised before it reads as all-correct. It becomes truthful after a session or two.` },
+
+    { icon:'📅', title:'Coming up', color:'#74b9ff', body:
+`A seven-day forecast of when cards come back, one bar per day, stacked by position so you can see WHICH shape is landing when. "now" is today, including anything overdue.
+
+Cards you have never tried are counted in the line underneath rather than in the bars — they are not scheduled yet, so putting them on a day would be inventing a date.` },
 
     { icon:'✅', title:'When a shape counts as solid', color:'#2ed573', body:
 `Two different bars, and they mean different things.
@@ -1066,6 +1187,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
   const sessionN = settings.sessionN || 12;
   const keyMode = settings.keyMode || 'random';
   const [queue, setQueue] = useState(null);
+  const [scope, setScope] = useState(null);   // the spec the running session was built from
   const [qi, setQi] = useState(0);
   const [answer, setAnswer] = useState(null);   // { correct, missed, wrong, verdict }
   const [picked, setPicked] = useState(new Set());
@@ -1079,22 +1201,37 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
   const prog = useMemo(() => shapeProgress(focusNum, srs, drills), [focusNum, srs, drills]);
   const ladder = useMemo(() => [1,2,3,4,5].map(n => ({ n, ...shapeProgress(n, srs, drills) })), [srs, drills]);
   const focusShape = useMemo(() => getCagedShape(root, focusNum), [root, focusNum]);
-  const dueTotal = useMemo(() => {
-    const td = todayStr();
-    return buildCards(drills).filter(c => srs[c.id] && dayDiff(td, srs[c.id].nextDue) <= 0).length;
-  }, [srs, drills]);
+  // One recommendation, the weak list, and the forecast. All three are derived
+  // from at_srs — nothing new is persisted for any of this.
+  const plan = useMemo(() => nextUp(srs, drills, focusNum), [srs, drills, focusNum]);
+  const weak = useMemo(() => weakestDrills(srs, drills), [srs, drills]);
+  const focusWeak = useMemo(() => weakestDrills(srs, drills, [focusNum], 1)[0] || null, [srs, drills, focusNum]);
+  const anyGraded = useMemo(
+    () => drills.some(d => drillProgress(d, srs).seen >= WEAK_MIN_SEEN), [srs, drills]);
+  const fc = useMemo(() => forecastStacked(buildCards(drills), srs), [srs, drills]);
 
   // Each rep picks its own key, so the app-wide key selector would be showing
   // something different from the card. Tell App to hide it while we run.
   useEffect(() => { onSession?.(!!queue); }, [queue, onSession]);
   useEffect(() => () => onSession?.(false), [onSession]);
 
-  const start = (nums) => {
-    const cards = buildCards(drills).filter(c => nums.includes(c.shape));
-    setQueue(buildQueue(cards, srs, sessionN, pickKey));
+  // One entry point for every way into a session. `shapes` narrows by position,
+  // `only` narrows by drill (that is the whole weak-aspect mechanism), and
+  // `dueOnly` builds a session that is exactly the cards that are owing.
+  // `label` is what the running header calls this session, since "Position 3"
+  // stops being true the moment a session spans positions.
+  const start = (spec = {}) => {
+    const { shapes = [1,2,3,4,5], only = null, dueOnly = false, label = 'All five' } = spec;
+    const cards = buildCards(drills)
+      .filter(c => shapes.includes(c.shape))
+      .filter(c => !only || only.includes(c.drill));
+    const q = buildQueue(cards, srs, sessionN, pickKey, { dueOnly });
+    if (!q.length) return;              // nothing to ask; stay on the idle screen
+    setScope({ shapes, only, dueOnly, label });
+    setQueue(q);
     setQi(0); setAnswer(null); setPicked(new Set()); setTally({ ok:0, miss:0 });
   };
-  const quit = () => { setQueue(null); setAnswer(null); setPicked(new Set()); };
+  const quit = () => { setQueue(null); setScope(null); setAnswer(null); setPicked(new Set()); };
 
   const card = { background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:12, marginBottom:12 };
   const h = { fontSize:11, color:'#888', letterSpacing:'.5px', textTransform:'uppercase', fontWeight:800, marginBottom:8 };
@@ -1112,7 +1249,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
             <div style={{ fontSize:22, fontWeight:900, color:'#fff' }}>{tally.ok} / {tally.ok + tally.miss}</div>
             <div style={{ fontSize:12, color:'#999', marginTop:6 }}>Every rep was in a different key. That is the part that sticks.</div>
           </div>
-          <button onClick={()=>start(queue.map(q=>q.shape).filter((v,i,a)=>a.indexOf(v)===i))} style={primary}>Go again</button>
+          <button onClick={()=>start({ ...scope, dueOnly:false })} style={primary}>Go again</button>
           <button onClick={quit} style={ghost}>Done</button>
         </div>
       );
@@ -1178,7 +1315,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
           <button onClick={quit} aria-label="End session" style={{ background:'transparent', border:'1px solid #2a2840', color:'#aaa', borderRadius:8, padding:'6px 11px', fontSize:12, fontWeight:700, cursor:'pointer', minHeight:40, touchAction:'manipulation' }}>End</button>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:12, color:'#888' }}>Position {it.shape} · {qi+1} / {queue.length}</div>
+            <div style={{ fontSize:12, color:'#888' }}>{scope?.label || `Position ${it.shape}`} · {qi+1} / {queue.length}</div>
             <div style={{ height:4, background:'#1a1928', borderRadius:2, marginTop:4, overflow:'hidden' }}>
               <div style={{ width:`${(qi/queue.length)*100}%`, height:'100%', background:'#e17055' }} />
             </div>
@@ -1188,7 +1325,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
         <div style={{ ...card, textAlign:'center' }}>
           <div style={{ fontSize:18, fontWeight:900, color:'#e17055' }}>{NOTE_NAMES[it.root]}7alt</div>
           <div style={{ fontSize:13.5, color:'#ddd', marginTop:6, lineHeight:1.5 }}>
-            {blank ? `Position ${it.shape} — ${meta.ask.toLowerCase()}` : meta.ask}
+            Position {it.shape} — {meta.ask.charAt(0).toLowerCase() + meta.ask.slice(1)}
           </div>
           {it.drill !== 'root' && it.drill !== 'build' && it.drill !== 'fill' && (
             <div style={{ fontSize:11, color:'#777', marginTop:5 }}>
@@ -1260,8 +1397,49 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
     return { d, on: isLearned(c), part: !!c && !isLearned(c) };
   });
 
+  // Plain English for "which position is due and what do I do now". One line
+  // of what, one line of why, one button — the alternative is making Zak read
+  // five ladder rows and do the arithmetic himself, which is the complaint.
+  const nList = ns => ns.length === 1 ? `Position ${ns[0]}`
+    : `Positions ${ns.slice(0,-1).join(', ')} and ${ns[ns.length-1]}`;
+  const NEXT = {
+    due: () => ({
+      title: `${plan.count} card${plan.count>1?'s':''} due`,
+      why: `across ${nList(plan.shapes)}. These are the ones the schedule says you are about to forget.`,
+      cta: "▶ Review what's due",
+      go: () => start({ dueOnly:true, label:'Due today' }),
+    }),
+    'focus-new': () => ({
+      title: `Position ${focusNum} has ${plan.count} drill${plan.count>1?'s':''} you have not tried`,
+      why: 'Nothing is due, so start the ones you have never answered.',
+      cta: `▶ Practise Position ${focusNum}`,
+      go: () => start({ shapes:[focusNum], label:`Position ${focusNum}` }),
+    }),
+    weak: () => ({
+      title: `${DRILL_META[plan.drill].label} is your weakest — ${plan.right} of ${plan.seen} right`,
+      why: 'Nothing is due and nothing is untried, so this is the thing most worth an extra pass.',
+      cta: `▶ Drill ${DRILL_META[plan.drill].label}`,
+      go: () => start({ only:[plan.drill], label:DRILL_META[plan.drill].label }),
+    }),
+    clear: () => ({
+      title: 'Nothing due today',
+      why: plan.soonest === null ? 'Nothing scheduled yet — any session starts the clock.'
+        : plan.soonest === 1 ? 'Next review is tomorrow. Practising early still counts.'
+        : `Next review in ${plan.soonest} days. Practising early still counts.`,
+      cta: `▶ Practise Position ${focusNum} anyway`,
+      go: () => start({ shapes:[focusNum], label:`Position ${focusNum}` }),
+    }),
+  }[plan.kind]();
+
   return (
     <div style={{ padding:'14px 12px' }}>
+      <div style={{ ...card, borderColor: plan.kind === 'due' ? '#e1705577' : '#1a1928' }}>
+        <div style={h}>Next up</div>
+        <div style={{ fontSize:15.5, fontWeight:800, color:'#fff', lineHeight:1.4 }}>{NEXT.title}</div>
+        <div style={{ fontSize:11.5, color:'#8a8a9a', lineHeight:1.6, marginTop:5, marginBottom:11 }}>{NEXT.why}</div>
+        <button onClick={NEXT.go} style={primary}>{NEXT.cta}</button>
+      </div>
+
       <div style={{ ...card, borderColor:'#e1705544' }}>
         <div style={h}>Your focus</div>
         <div style={{ display:'flex', alignItems:'baseline', gap:8, flexWrap:'wrap' }}>
@@ -1271,14 +1449,32 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
         <div style={{ marginTop:10, marginBottom:10 }}>
           <Fretboard cells={focusShape?.cells || []} root={root} labelMode={labelMode} />
         </div>
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:10 }}>
+        {/* These were status pills. They are controls now — tapping one drills
+            just that aspect on this shape, which is the answer to "strong on
+            root-to-root, weak on the resolving notes". They need the 44px
+            target the rest of the app uses, and they need the hint line: they
+            still LOOK like status, so nobody would think to press one. */}
+        <div style={{ display:'flex', gap:7, flexWrap:'wrap', marginBottom:6 }}>
           {pips(focusNum).map(({d,on,part}) => (
-            <span key={d} style={{ fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:14,
-              border:`1px solid ${on?'#2ed573':part?'#74b9ff':'#2a2840'}`,
-              color:on?'#2ed573':part?'#74b9ff':'#777' }}>
+            <button key={d} onClick={()=>start({ shapes:[focusNum], only:[d], label:DRILL_META[d].label })}
+              style={{ fontSize:11.5, fontWeight:700, padding:'0 12px', borderRadius:14, minHeight:44,
+                background:'transparent', cursor:'pointer', touchAction:'manipulation',
+                border:`1px solid ${on?'#2ed573':part?'#74b9ff':'#2a2840'}`,
+                color:on?'#2ed573':part?'#74b9ff':'#999' }}>
               {on?'●':part?'◐':'○'} {DRILL_META[d].short}
-            </span>
+            </button>
           ))}
+        </div>
+        <div style={{ fontSize:10.5, color:'#666', marginBottom:10 }}>
+          Tap one to drill just that, on this shape.
+          {/* Weak spots below is measured across all five shapes, so a drill you
+              are shaky on HERE and fine with elsewhere is correctly diluted out
+              of it. This line is where that case surfaces. */}
+          {focusWeak && (
+            <span style={{ color:'#e17055', fontWeight:700 }}>
+              {' '}Weakest here: {DRILL_META[focusWeak.drill].label} ({focusWeak.right} of {focusWeak.seen}).
+            </span>
+          )}
         </div>
         {/* "0/12 keys" meant nothing on its own: 12 is not the target, 6 is, and
             nothing said where the number came from. */}
@@ -1290,8 +1486,10 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
           where the notes are. Get {READY_KEYS} of them, with every drill above at {READY_REPS} correct
           answers, and Position {Math.min(5, focusNum+1)} gets suggested.
         </div>
-        <button onClick={()=>start([focusNum])} style={primary}>▶ Practise Position {focusNum}</button>
-        <button onClick={()=>start([1,2,3,4,5])} style={ghost}>Practise all five{dueTotal ? ` · ${dueTotal} due` : ''}</button>
+        <button onClick={()=>start({ shapes:[focusNum], label:`Position ${focusNum}` })} style={primary}>▶ Practise Position {focusNum}</button>
+        {/* The due count lives in the Next up card now. Two places showing the
+            same number is two places for them to disagree. */}
+        <button onClick={()=>start({ label:'All five' })} style={ghost}>Practise all five</button>
       </div>
 
       {prog.ready && focusNum < 5 && (
@@ -1303,6 +1501,40 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
           <div style={{ display:'flex', gap:8 }}>
             <button onClick={()=>onFocus(focusNum+1)} style={{ ...primary, background:'#2ed573', color:'#06281f', flex:1 }}>Move on</button>
             <button onClick={()=>onFocus(focusNum)} style={{ ...ghost, marginTop:0, width:'auto', padding:'10px 16px' }}>Not yet</button>
+          </div>
+        </div>
+      )}
+
+      {/* Only once there is enough history to mean anything — WEAK_MIN_SEEN
+          attempts. And when the data exists but nothing is lagging, the card
+          SAYS so rather than vanishing: a card that disappears silently reads
+          as a bug, and good news is worth reporting. */}
+      {anyGraded && (
+        <div style={card}>
+          <div style={h}>Weak spots</div>
+          {weak.length === 0 ? (
+            <div style={{ fontSize:12, color:'#2ed573', fontWeight:700 }}>
+              Nothing is lagging — every drill you have practised is above {Math.round(WEAK_ACC*100)}%.
+            </div>
+          ) : weak.map(w => (
+            <div key={w.drill} style={{ display:'flex', alignItems:'center', gap:9, padding:'8px 0',
+              borderTop:'1px solid #1a1928' }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12.5, fontWeight:800, color:'#fff' }}>{DRILL_META[w.drill].label}</div>
+                <div style={{ fontSize:10.5, color:'#888', marginTop:3 }}>
+                  {w.right} of {w.seen} right · {w.solid} of {w.total} shapes solid
+                </div>
+              </div>
+              <button onClick={()=>start({ only:[w.drill], label:DRILL_META[w.drill].label })}
+                style={{ background:'transparent', border:'1px solid #e1705566', color:'#e17055', borderRadius:8,
+                  padding:'8px 12px', fontSize:11, fontWeight:800, cursor:'pointer', minHeight:44, touchAction:'manipulation' }}>
+                ▶ drill
+              </button>
+            </div>
+          ))}
+          <div style={{ fontSize:10.5, color:'#666', lineHeight:1.6, marginTop:9 }}>
+            Counted across all five shapes, so a drill you are shaky on everywhere shows up
+            here even when no single position looks bad. Drilling one runs it on every shape.
           </div>
         </div>
       )}
@@ -1322,7 +1554,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
                     above. The three-colour proportional bar this replaces had
                     no legend, was 5px tall, and one of its three segments was
                     transparent — unreadable by construction. */}
-                <div style={{ display:'flex', alignItems:'center', gap:9, marginTop:5 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:7, marginTop:5, flexWrap:'wrap' }}>
                   <span style={{ display:'inline-flex', gap:4 }}>
                     {pips(l.n).map(({d,on,part}) => (
                       <span key={d} title={DRILL_META[d].short} style={{ width:8, height:8, borderRadius:'50%', boxSizing:'border-box',
@@ -1333,13 +1565,28 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
                   <span style={{ fontSize:10, color:'#777' }}>
                     {l.ready ? `solid · ${l.keyCount} keys`
                       : l.nw === l.total ? 'not started'
-                      : `${l.mastered} of ${l.total} drills · keys ${l.keyCount}/${READY_KEYS}${l.due?` · ${l.due} due`:''}`}
+                      : `${l.mastered} of ${l.total} drills · keys ${l.keyCount}/${READY_KEYS}`}
                   </span>
+                  {/* Due was buried in the tail of that string, which is where
+                      you look last. It is the one number you scan the ladder for. */}
+                  {l.due > 0 && (
+                    <span style={{ fontSize:9.5, fontWeight:800, color:'#e17055', background:'#e1705518',
+                      border:'1px solid #e1705544', borderRadius:9, padding:'1px 6px', whiteSpace:'nowrap' }}>
+                      {l.due} due
+                    </span>
+                  )}
                 </div>
               </div>
+              {/* Practising a shape must NOT move the focus. The focus is the
+                  plan; wandering off to shore up Position 5 is not a new plan. */}
+              <button onClick={()=>start({ shapes:[l.n], label:`Position ${l.n}` })} aria-label={`Practise Position ${l.n}`}
+                style={{ background:'transparent', border:'1px solid #e1705566', color:'#e17055', borderRadius:8,
+                  padding:0, fontSize:12, fontWeight:800, cursor:'pointer', minHeight:44, minWidth:44, touchAction:'manipulation' }}>
+                ▶
+              </button>
               <button onClick={()=>onFocus(l.n)} disabled={isFocus}
                 style={{ background:'transparent', border:`1px solid ${isFocus?'#e17055':'#2a2840'}`, color:isFocus?'#e17055':'#888',
-                  borderRadius:8, padding:'8px 10px', fontSize:11, fontWeight:700, cursor:isFocus?'default':'pointer', minHeight:44, minWidth:44, touchAction:'manipulation' }}>
+                  borderRadius:8, padding:'0 9px', fontSize:11, fontWeight:700, cursor:isFocus?'default':'pointer', minHeight:44, minWidth:44, touchAction:'manipulation' }}>
                 {isFocus ? 'focus' : 'set'}
               </button>
             </div>
@@ -1356,6 +1603,46 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
           cards keep coming back on a schedule, which is what makes them stay.
         </div>
       </div>
+
+      {/* Last, because it is the one card you read rather than act on. The two
+          summary lines under the bars are the part that actually carries at
+          phone width; the bars are the shape of the week. */}
+      {(fc.dueToday > 0 || fc.newCount > 0 || fc.soonest !== null) && (
+        <div style={card}>
+          <div style={h}>Coming up</div>
+          <div style={{ display:'flex', alignItems:'flex-end', gap:5, height:64, marginBottom:6 }}>
+            {fc.buckets.map((b,i) => {
+              const tallest = Math.max(1, ...fc.buckets.map(x => x.total));
+              return (
+                <div key={i} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
+                  <div style={{ width:'100%', height:52, display:'flex', flexDirection:'column-reverse', justifyContent:'flex-start' }}>
+                    {b.byShape.map((n,si) => n === 0 ? null : (
+                      <div key={si} title={`Position ${si+1}: ${n}`}
+                        style={{ height:`${(n/tallest)*100}%`, background:FC_TINT[si], borderRadius:1 }} />
+                    ))}
+                  </div>
+                  <div style={{ fontSize:9, color:'#666' }}>{i === 0 ? 'now' : `+${i}`}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', fontSize:9.5, color:'#777', paddingTop:7, borderTop:'1px solid #1a1928' }}>
+            {FC_TINT.map((c,i) => (
+              <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:3 }}>
+                <span style={{ width:8, height:8, borderRadius:2, background:c, display:'inline-block' }} />P{i+1}
+              </span>
+            ))}
+          </div>
+          <div style={{ fontSize:11, color:'#aaa', lineHeight:1.7, marginTop:8 }}>
+            {fc.dueToday > 0
+              ? `${fc.dueToday} card${fc.dueToday>1?'s':''} due right now.`
+              : fc.soonest === null ? 'Nothing scheduled yet.'
+              : fc.soonest === 1 ? 'Next review is tomorrow.'
+              : `Next review in ${fc.soonest} days.`}
+            {fc.newCount > 0 && ` ${fc.newCount} never tried.`}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1437,7 +1724,14 @@ export default function App() {
       const next = { ...prev, [id]: {
         ...updateSRS(prev[id], correct),
         keysSeen: (prev[id]?.keysSeen || 0) | (correct ? (1 << atRoot) : 0),
-        seen: (prev[id]?.seen || 0) + 1,
+        seen:  (prev[id]?.seen  || 0) + 1,
+        // `seen` was already being written and never read. `wrong` is its
+        // partner, and the pair is what lets Weak spots say "5 of 11 right"
+        // instead of something vague. Absent reads as 0, so old progress loads
+        // fine — it just reads as 100% until fresh misses accrue. Do NOT try to
+        // back-fill it from reps/ef: a guess dressed as a measurement is worse
+        // than a number that is briefly optimistic.
+        wrong: (prev[id]?.wrong || 0) + (correct ? 0 : 1),
       } };
       jstore.set('at_srs', next);
       return next;
