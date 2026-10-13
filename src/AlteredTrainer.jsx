@@ -627,7 +627,7 @@ function ExplorerTab({ root, labelMode }) {
   const spelling = ALT.map(iv => ({ deg: ALT_LABEL[iv], note: NOTE_NAMES[pc(root + iv)] }));
   const rootMidi = 48 + root;
   const playScale = () => playMidis([...ALT.map(i=>rootMidi+i), rootMidi+12], 0.2);
-  const card = { background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:'12px 13px', marginBottom:12 };
+  const card = { background:'#13121f', borderWidth:1, borderStyle:'solid', borderColor:'#2a2840', borderRadius:12, padding:'12px 13px', marginBottom:12 };
   const h = { fontSize:11, color:'#888', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:6 };
   return (
     <div style={{ padding:'14px 12px' }}>
@@ -793,7 +793,7 @@ function PositionsTab({ root, labelMode, settings, shapeNum, onShapeNum, focusNu
         <button onClick={()=>setFullNeck(f=>!f)} style={{ background:fullNeck?'#74b9ff':'transparent', color:fullNeck?'#111':'#74b9ff', border:'1px solid #74b9ff55', borderRadius:7, padding:'6px 11px', fontSize:11, fontWeight:700, cursor:'pointer', minHeight:34, touchAction:'manipulation' }}>{fullNeck?'◧ Full neck':'◫ Full neck'}</button>
       </div>
 
-      <div style={{ background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:'10px 8px', overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
+      <div style={{ background:'#13121f', borderWidth:1, borderStyle:'solid', borderColor:'#2a2840', borderRadius:12, padding:'10px 8px', overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
         <Fretboard cells={cells} root={root} labelMode={labelMode} resolve={tgt} sc={1.15} />
       </div>
 
@@ -863,7 +863,7 @@ function SettingsTab({ settings, onChange, onResetProgress }) {
   const [banner, setBanner] = useState('idle');
   const resetBanner = () => { try { localStorage.removeItem('at_ios_hint'); } catch(e){} setBanner('done'); setTimeout(()=>setBanner('idle'), 1800); };
 
-  const card = { background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:'13px', marginBottom:12 };
+  const card = { background:'#13121f', borderWidth:1, borderStyle:'solid', borderColor:'#2a2840', borderRadius:12, padding:'13px', marginBottom:12 };
   const h = { fontSize:11, color:'#888', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:9 };
   const seg = on => ({ flex:1, padding:'9px 4px', background:on?'#e17055':'transparent', color:on?'#fff':'#aaa', border:`1px solid ${on?'#e17055':'#2a2840'}`, borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer', minHeight:40, touchAction:'manipulation' });
   const tseg = on => ({ flex:1, padding:'9px 4px', background:on?'#2dd4bf':'transparent', color:on?'#06281f':'#9fe', border:`1px solid ${on?'#2dd4bf':'#2dd4bf55'}`, borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer', minHeight:40, touchAction:'manipulation' });
@@ -1155,7 +1155,7 @@ Reset practice progress erases every drill result and puts the focus back to Pos
         {S.map((sec,i) => {
           const isO = open === i;
           return (
-            <div key={i} style={{ background:'#13121f', borderRadius:10, border:`1px solid ${isO?sec.color+'55':'#1a1928'}`, overflow:'hidden' }}>
+            <div key={i} style={{ background:'#13121f', borderRadius:10, border:`1px solid ${isO?sec.color+'55':'#2a2840'}`, overflow:'hidden' }}>
               <button onClick={()=>setOpen(isO?null:i)}
                 style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'12px 13px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left', minHeight:46, touchAction:'manipulation' }}>
                 <span style={{ fontSize:16 }}>{sec.icon}</span>
@@ -1233,7 +1233,11 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
   };
   const quit = () => { setQueue(null); setScope(null); setAnswer(null); setPicked(new Set()); };
 
-  const card = { background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:12, marginBottom:12 };
+  // Border as longhands, never the `border` shorthand. The Next up card
+  // overrides borderColor, and when a session starts React reuses that element
+  // for the question card: removing the borderColor longhand also wiped the
+  // shorthand's colour, and the question card came out with a white border.
+  const card = { background:'#13121f', borderWidth:1, borderStyle:'solid', borderColor:'#2a2840', borderRadius:12, padding:12, marginBottom:12 };
   const h = { fontSize:11, color:'#888', letterSpacing:'.5px', textTransform:'uppercase', fontWeight:800, marginBottom:8 };
   const primary = { width:'100%', background:'#e17055', color:'#fff', border:'none', borderRadius:10, padding:'14px', fontSize:15, fontWeight:800, cursor:'pointer', minHeight:48, touchAction:'manipulation' };
   const ghost = { width:'100%', background:'transparent', color:'#aaa', border:'1px solid #2a2840', borderRadius:9, padding:'10px', fontSize:12.5, fontWeight:700, cursor:'pointer', minHeight:42, touchAction:'manipulation', marginTop:8 };
@@ -1344,7 +1348,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
         {/* Full-bleed on purpose: the tab's 12px side padding is exactly what
             drops an 8-fret cell from 44.2px to 42.9px, under the touch minimum.
             Measured, not guessed. */}
-        <div style={{ background:'#13121f', border:'1px solid #1a1928', borderRadius:12, padding:'10px 0', margin:'0 -12px' }}>
+        <div style={{ background:'#13121f', borderWidth:1, borderStyle:'solid', borderColor:'#2a2840', borderRadius:12, padding:'10px 0', margin:'0 -12px' }}>
           <Fretboard cells={shown} root={it.root} labelMode={labelMode} mono
             win={win} rowH={36} fill highlight={hl} marks={marks} selected={answer ? null : picked}
             onTapCell={answer ? undefined : toggle} />
@@ -1433,7 +1437,7 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
 
   return (
     <div style={{ padding:'14px 12px' }}>
-      <div style={{ ...card, borderColor: plan.kind === 'due' ? '#e1705577' : '#1a1928' }}>
+      <div style={{ ...card, borderColor: plan.kind === 'due' ? '#e1705577' : '#2a2840' }}>
         <div style={h}>Next up</div>
         <div style={{ fontSize:15.5, fontWeight:800, color:'#fff', lineHeight:1.4 }}>{NEXT.title}</div>
         <div style={{ fontSize:11.5, color:'#8a8a9a', lineHeight:1.6, marginTop:5, marginBottom:11 }}>{NEXT.why}</div>
