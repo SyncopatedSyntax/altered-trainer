@@ -918,8 +918,6 @@ function SettingsTab({ settings, onChange, onResetProgress }) {
       </div>
 
       <div style={card}>
-        <div style={h}>Notifications</div>
-      <div style={card}>
         <div style={h}>Practice drills</div>
         <div style={{ display:'flex', flexDirection:'column', gap:7 }}>
           {DRILLS.map(d => {
@@ -964,6 +962,8 @@ function SettingsTab({ settings, onChange, onResetProgress }) {
         </button>
       </div>
 
+      <div style={card}>
+        <div style={h}>Install banner</div>
         <button onClick={resetBanner} style={{ background:'transparent', border:'1px solid #2a2840', color:banner==='done'?'#2dd4bf':'#ccc', borderRadius:8, padding:'9px 14px', fontSize:12, fontWeight:700, cursor:'pointer', minHeight:40, touchAction:'manipulation' }}>
           {banner==='done' ? '✓ Reset — banner will show again' : 'Reset install banner'}
         </button>
