@@ -143,9 +143,12 @@ function getTargetTones(root, kind) {   // kind: 'maj' | 'min'
 // SM-2 copied verbatim from triads-trainer/src/TriadTrainer.jsx:32-46, which is
 // byte-identical to Diatonic's. Do not re-derive it; a fix in one should be
 // carried to all three.
+// Days are UTC calendar days (todayStr), so the arithmetic is done in UTC too.
+// Local-time arithmetic put "tomorrow" on today anywhere east of Greenwich,
+// and lost a day whenever a gap crossed a clock change.
 const todayStr = () => new Date().toISOString().slice(0,10);
-const addDays = (s,n) => { const d = new Date(s+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
-const dayDiff = (a,b) => Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00'))/86400000);
+const addDays = (s,n) => { const d = new Date(s+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); };
+const dayDiff = (a,b) => Math.round((new Date(b+'T00:00:00Z') - new Date(a+'T00:00:00Z'))/86400000);
 function updateSRS(card, correct) {
   const ef = card?.ef ?? 2.5, reps = card?.reps ?? 0, interval = card?.interval ?? 1;
   if (correct) {
