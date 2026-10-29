@@ -21,7 +21,7 @@ user: Zak. Shared publicly via Ko-fi `syncopatedsyntax`.
     pattern onto the neck, sorts low→high.
   - `getTnpsPositions(root)` — 7 three-notes-per-string patterns, generated from
     the altered scale's pitch classes.
-  - `getResolutions` / `getTargetTones(root, kind)` — I-chord tones + half-step pulls.
+  - `getTargetTones(root, kind)` — the I chord's tones, for the resolution overlay.
 - Persistence: **two helpers, deliberately**. `store` is the original async
   string accessor and still carries the old prefs; `jstore` is a sync JSON one
   added for the practice data, because grading happens inside a tap handler and

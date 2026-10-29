@@ -30,7 +30,6 @@ function literal(name) {
   const i = src.indexOf(`const ${name} = `);
   if (i < 0) fail(`${name} not found in AlteredTrainer.jsx`);
   const start = src.indexOf('=', i) + 1;
-  const open = src[src.indexOf('[', start) === start + 1 ? start + 1 : src.search.length];
   // Walk brackets from the first [ or { after the =
   let j = start;
   while (j < src.length && src[j] !== '[' && src[j] !== '{') j++;
@@ -52,7 +51,6 @@ const pc = n => ((n % 12) + 12) % 12;
 // Altered scale = 7th mode of melodic minor: R b9 #9 3 #11 b13 b7
 const ALT_IV = { R: 0, b9: 1, '#9': 3, 3: 4, '#11': 6, b13: 8, b7: 10 };
 const ALT = Object.values(ALT_IV);
-const degAt = (midi, root) => Object.keys(ALT_IV).find(d => ALT_IV[d] === pc(midi - root));
 
 // The app's own transform, restated independently: shift every fret by the
 // parent key, then octave-normalise the whole block into [0,12).

@@ -114,22 +114,9 @@ function getFullNeck(root, loF=0, hiF=15) {
 // signed shortest semitone distance a->b
 const sdist = (a, b) => { let d = ((b - a) % 12 + 12) % 12; if (d > 6) d -= 12; return d; };
 
-// resolution analysis: each altered tone -> target chord-tone half-step pulls
+// the I chord's tones, for the resolution overlay
 const MAJ_TONES = {0:'R',4:'3',7:'5',11:'Δ7',2:'9',9:'13'};
 const MIN_TONES = {0:'R',3:'b3',7:'5',10:'b7',11:'Δ7',2:'9'};
-function getResolutions(root, kind) {  // kind: 'maj' | 'min' | 'sub'
-  const targetRoot = (root + 5) % 12;
-  const tones = kind === 'min' ? MIN_TONES : MAJ_TONES;  // sub resolves to I major
-  return ALT.map(iv => {
-    const np = pc(root + iv), cands = [];
-    for (const ti in tones) {
-      const tp = pc(targetRoot + (+ti)), d = sdist(np, tp);
-      if (Math.abs(d) <= 1) cands.push({ tp, deg: tones[ti], d });
-    }
-    cands.sort((a,b) => Math.abs(a.d) - Math.abs(b.d));
-    return { iv, altDeg: ALT_LABEL[iv], notePc: np, cands, guide: iv === 4 || iv === 10 };
-  });
-}
 // target chord tones of the I (for the resolution overlay): pc -> I-degree label
 function getTargetTones(root, kind) {   // kind: 'maj' | 'min'
   const tr = (root + 5) % 12;
@@ -210,7 +197,6 @@ const DEFAULT_DRILLS = ['root','ires','fill','octave','build'];
 // the nut, which verify.mjs pins at 15 of 60 combinations).
 const WIN_W = 8;
 const winFor = (sh, k=0) => { const lo = Math.max(0, sh.lo - Math.min(k, sh.lo)); return { lo, hi: lo + WIN_W - 1 }; };
-const offsetFor = sh => ri(Math.min(3, sh.lo) + 1);
 
 // One octave of a shape: its lowest root up to the next one. Same idea as
 // MelodicMinorTrainer's getRootSpans() — a box played end to end starts and
@@ -498,7 +484,6 @@ const txtOn = hex => { const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(
 // Horizontal fretboard: high e on top, low E bottom, frets L->R.
 // resolve (optional): { tones: {pc: I-degree} } overlays target chord tones
 // as teal squares (clearly NOT part of the altered scale).
-const TGT_COLOR = '#2dd4bf';
 // visual hierarchy for resolution targets: 3rd most prominent, root prominent, rest muted
 function targetStyle(deg, thirdDeg) {
   if (deg === thirdDeg) return { stroke:'#ef4444', text:'#ef4444', sw:2.8, solid:false, big:true  }; // 3rd: red outline, largest
@@ -1279,7 +1264,6 @@ function PracticeTab({ root, labelMode, settings, srs, onGrade, focus, onFocus, 
       : sh.cells;
     const { ok, near } = answerSet(it.drill, sh, it.root, win, blanks);
     const meta = DRILL_META[it.drill];
-    const targetPc = it.drill === 'ires' ? pc(it.root+5) : it.drill === 'ithird' ? pc(it.root+9) : it.root;
 
     const toggle = (st, f) => {
       if (answer) return;
