@@ -1741,35 +1741,18 @@ export default function App() {
   }, []);
   useEffect(() => { setKeyMode(settings.defKeyMode === 'tonic' ? 'tonic' : 'dom'); }, [settings.defKeyMode]);
 
-  // PWA: manifest, icon, theme, iOS scroll fix
+  // Theme and the iOS scroll fix. The icon, title and manifest are static, in
+  // index.html and public/.
   useEffect(() => {
     const style = document.createElement('style');
     style.textContent = `*{-webkit-tap-highlight-color:transparent}body{margin:0}`;
     document.head.appendChild(style);
 
-    const makeIcon = (size) => {
-      const c = document.createElement('canvas'); c.width = c.height = size;
-      const x = c.getContext('2d'); const u = size/512;
-      x.fillStyle = '#0f0e17'; x.beginPath();
-      const rr = 96*u; x.moveTo(rr,0); x.arcTo(size,0,size,size,rr); x.arcTo(size,size,0,size,rr); x.arcTo(0,size,0,0,rr); x.arcTo(0,0,size,0,rr); x.fill();
-      const dots = [['b9','#7c5cbf'],['#9','#6c5ce7'],['3','#ffd93d'],['#11','#0fbcf9'],['b13','#9b2335']];
-      dots.forEach((d,i) => { x.beginPath(); x.arc((110+i*73)*u,(256)*u,30*u,0,7); x.fillStyle=d[1]; x.fill(); });
-      x.fillStyle = '#fff'; x.font = `bold ${70*u}px sans-serif`; x.textAlign='center';
-      x.fillText('alt', size/2, 150*u);
-      return c.toDataURL('image/png');
-    };
-    const i512 = makeIcon(512), i180 = makeIcon(180);
-    const setLink = (rel, sizes, href) => { let l = document.querySelector(`link[rel="${rel}"]${sizes?`[sizes="${sizes}"]`:''}`); if(!l){l=document.createElement('link');l.rel=rel;if(sizes)l.sizes=sizes;document.head.appendChild(l);} l.href=href; };
-    setLink('apple-touch-icon','180x180',i180); setLink('icon','512x512',i512);
     const setMeta = (n,c) => { let m=document.querySelector(`meta[name="${n}"]`); if(!m){m=document.createElement('meta');m.name=n;document.head.appendChild(m);} m.content=c; };
     setMeta('theme-color','#0f0e17');
     setMeta('viewport','width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover');
     setMeta('apple-mobile-web-app-capable','yes');
     setMeta('apple-mobile-web-app-status-bar-style','black-translucent');
-    setMeta('apple-mobile-web-app-title','Fretworks');
-    // Single PWA: reference the unified shell manifest (one manifest per origin)
-    // instead of generating a competing per-app manifest.
-    let mlink = document.querySelector('link[rel="manifest"]'); if(!mlink){mlink=document.createElement('link');mlink.rel='manifest';document.head.appendChild(mlink);} mlink.href = '/manifest.webmanifest';
 
     window.scrollTo(0,0);
     const lock = () => { if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0,0); };
